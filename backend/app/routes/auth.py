@@ -17,6 +17,8 @@ from ..services.auth_wallet import (
     register_user,
     require_authenticated_user,
     reset_password_from_token,
+    send_password_reset_success_notification,
+    send_registration_success_notification,
     update_user_profile,
 )
 from ..services.storage import list_user_generation_history
@@ -88,6 +90,10 @@ def register(payload: RegisterRequest, response: Response):
         secure=False,
         max_age=_session_cookie_max_age(30),
     )
+    try:
+        send_registration_success_notification(created)
+    except Exception:
+        pass
     return {
         "authenticated": True,
         "user": created,
@@ -146,6 +152,11 @@ def reset_password(payload: ResetPasswordRequest):
         result = reset_password_from_token(payload.token, payload.new_password)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    try:
+        send_password_reset_success_notification(str(result["email"]))
+    except Exception:
+        pass
 
     return {"ok": True, "email": result["email"]}
 

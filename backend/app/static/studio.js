@@ -1408,7 +1408,7 @@ authModal?.addEventListener("click", (e) => {
 
 authForm?.addEventListener("submit", async (event) => {
   event.preventDefault();
-  if (!authLogin || !authPassword || !authSubmit) return;
+  if (!authPassword || !authSubmit) return;
 
   if (authMode === "recover") {
     const email = (authRecoverEmail?.value || "").trim();
@@ -1492,18 +1492,24 @@ authForm?.addEventListener("submit", async (event) => {
     return;
   }
 
-  const login = authLogin.value.trim();
+  const login = authLogin?.value.trim() || "";
   const password = authPassword.value;
-  if (!login || !password) {
-    setAuthStatus("Completa email y contraseña.", "failed");
-    return;
-  }
 
   const isRegister = authMode === "register";
   const firstName = authFirstName?.value.trim() || "";
   const lastName = authLastName?.value.trim() || "";
   const passwordConfirm = authPasswordConfirm?.value || "";
   const registerEmail = authEmail?.value.trim() || login;
+
+  if (!password) {
+    setAuthStatus("Completa email y contraseña.", "failed");
+    return;
+  }
+
+  if (!isRegister && !login) {
+    setAuthStatus("Completa email y contraseña.", "failed");
+    return;
+  }
 
   if (isRegister) {
     if (!firstName || !lastName) {

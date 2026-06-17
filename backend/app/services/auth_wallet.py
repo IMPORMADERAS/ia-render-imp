@@ -108,6 +108,12 @@ def init_auth_wallet_db() -> None:
                             used_at TEXT,
                             FOREIGN KEY(user_id) REFERENCES users(id)
                         );
+
+                        CREATE TABLE IF NOT EXISTS notification_events (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            event_key TEXT UNIQUE NOT NULL,
+                            created_at TEXT NOT NULL
+                        );
             """
         )
 
@@ -209,6 +215,170 @@ def register_user(first_name: str, last_name: str, email: str, password: str, ph
             return _public_user(row)
     except sqlite3.IntegrityError as exc:
         raise ValueError("Ese email ya existe") from exc
+
+
+def _format_cop(amount_cop: int) -> str:
+    return f"{int(amount_cop):,}".replace(",", ".")
+
+
+def _record_notification_event_once(event_key: str) -> bool:
+    safe_key = (event_key or "").strip()
+    if not safe_key:
+        return False
+
+    try:
+        with _get_conn() as conn:
+            conn.execute(
+                "INSERT INTO notification_events (event_key, created_at) VALUES (?, ?)",
+                (safe_key, _utc_now_iso()),
+            )
+        return True
+    except sqlite3.IntegrityError:
+        return False
+
+
+def _get_user_contact(user_id: int) -> dict | None:
+    with _get_conn() as conn:
+        row = conn.execute(
+            "SELECT id, first_name, last_name, email, balance_cop FROM users WHERE id = ?",
+            (int(user_id),),
+        ).fetchone()
+
+    if row is None:
+        return None
+
+    return {
+        "user_id": int(row["id"]),
+        "first_name": str(row["first_name"] or ""),
+        "last_name": str(row["last_name"] or ""),
+        "email": str(row["email"] or ""),
+        "balance_cop": int(row["balance_cop"] or 0),
+    }
+
+
+def _full_name(first_name: str, last_name: str) -> str:
+    return (f"{(first_name or '').strip()} {(last_name or '').strip()}").strip() or "usuario"
+
+
+def send_registration_success_notification(user: dict) -> dict:
+    user_id = int(user.get("user_id") or 0)
+    if user_id <= 0:
+        return {"delivered": False, "mode": "skipped", "reason": "user_id_invalido"}
+
+    if not _record_notification_event_once(f"registration-success:{user_id}"):
+        return {"delivered": False, "mode": "skipped", "reason": "already_sent"}
+
+    email = str(user.get("email") or "").strip()
+    if not email:
+        return {"delivered": False, "mode": "skipped", "reason": "email_vacio"}
+
+    name = _full_name(str(user.get("first_name") or ""), str(user.get("last_name") or ""))
+    body = (
+        f"Hola {name},\n\n"
+        "Tu registro en IA-IMP fue exitoso.\n"
+        "Ya puedes iniciar sesion, recargar saldo y usar los modulos de generacion.\n\n"
+        "Gracias por confiar en IA-IMP."
+    )
+    return send_email_notification(email, "Registro exitoso en IA-IMP", body)
+
+
+def send_password_reset_success_notification(email: str) -> dict:
+    safe_email = _normalize_email(email)
+    body = (
+        "Tu contraseña en IA-IMP fue actualizada correctamente.\n\n"
+        "Si no realizaste este cambio, te recomendamos cambiar tu contraseña de inmediato "
+        "y contactar al soporte."
+    )
+    return send_email_notification(safe_email, "Contraseña actualizada en IA-IMP", body)
+
+
+def send_payment_success_notification(
+    *,
+    user_id: int,
+    reference: str,
+    amount_cop: int,
+    balance_cop: int,
+    transaction_id: str,
+) -> dict:
+    contact = _get_user_contact(user_id)
+    if contact is None or not str(contact.get("email") or "").strip():
+        return {"delivered": False, "mode": "skipped", "reason": "contacto_no_disponible"}
+
+    safe_reference = (reference or "").strip() or "SIN-REFERENCIA"
+    event_key = f"payment-success:{safe_reference}"
+    if not _record_notification_event_once(event_key):
+        return {"delivered": False, "mode": "skipped", "reason": "already_sent"}
+
+    name = _full_name(str(contact.get("first_name") or ""), str(contact.get("last_name") or ""))
+    safe_tx_id = (transaction_id or "").strip() or "N/A"
+    body = (
+        f"Hola {name},\n\n"
+        "Pago exitoso en IA-IMP.\n\n"
+        "Recibo:\n"
+        f"- Referencia: {safe_reference}\n"
+        f"- Transaccion: {safe_tx_id}\n"
+        f"- Monto acreditado: ${_format_cop(amount_cop)} COP\n"
+        f"- Saldo actual: ${_format_cop(balance_cop)} COP\n"
+        f"- Fecha (UTC): {datetime.now(timezone.utc).isoformat()}\n"
+    )
+    return send_email_notification(str(contact["email"]), "Pago exitoso IA-IMP (recibo)", body)
+
+
+def send_payment_failed_notification(
+    *,
+    user_id: int,
+    reference: str,
+    amount_cop: int,
+    status: str,
+    transaction_id: str,
+) -> dict:
+    contact = _get_user_contact(user_id)
+    if contact is None or not str(contact.get("email") or "").strip():
+        return {"delivered": False, "mode": "skipped", "reason": "contacto_no_disponible"}
+
+    safe_reference = (reference or "").strip() or "SIN-REFERENCIA"
+    safe_status = (status or "").strip().upper() or "FAILED"
+    event_key = f"payment-failed:{safe_reference}:{safe_status}"
+    if not _record_notification_event_once(event_key):
+        return {"delivered": False, "mode": "skipped", "reason": "already_sent"}
+
+    name = _full_name(str(contact.get("first_name") or ""), str(contact.get("last_name") or ""))
+    safe_tx_id = (transaction_id or "").strip() or "N/A"
+    body = (
+        f"Hola {name},\n\n"
+        "Tu intento de pago en IA-IMP no fue aprobado.\n\n"
+        "Detalle:\n"
+        f"- Referencia: {safe_reference}\n"
+        f"- Estado: {safe_status}\n"
+        f"- Transaccion: {safe_tx_id}\n"
+        f"- Monto solicitado: ${_format_cop(amount_cop)} COP\n"
+        f"- Fecha (UTC): {datetime.now(timezone.utc).isoformat()}\n\n"
+        "Puedes intentarlo nuevamente desde el modulo de recargas."
+    )
+    return send_email_notification(str(contact["email"]), "Pago no aprobado en IA-IMP", body)
+
+
+def send_low_balance_notification(
+    *,
+    user_id: int,
+    email: str,
+    first_name: str,
+    last_name: str,
+    balance_cop: int,
+    threshold_cop: int = 1000,
+) -> dict:
+    if int(balance_cop) > int(threshold_cop):
+        return {"delivered": False, "mode": "skipped", "reason": "above_threshold"}
+
+    name = _full_name(first_name, last_name)
+    body = (
+        f"Hola {name},\n\n"
+        "Tu saldo en IA-IMP esta por agotarse.\n"
+        f"- Saldo actual: ${_format_cop(balance_cop)} COP\n"
+        f"- Umbral de alerta: ${_format_cop(threshold_cop)} COP\n\n"
+        "Te recomendamos recargar para evitar interrupciones en tus renders."
+    )
+    return send_email_notification(email, "Alerta de saldo bajo IA-IMP", body)
 
 
 def authenticate_user(login: str, password: str) -> dict | None:
@@ -346,6 +516,10 @@ def debit_balance(user_id: int, amount_cop: int, module: str, note: str) -> int:
     if amount <= 0:
         raise ValueError("El monto debe ser mayor a 0")
 
+    should_notify_low_balance = False
+    low_balance_contact: dict | None = None
+    low_balance_threshold = 1000
+
     with _get_conn() as conn:
         row = conn.execute("SELECT balance_cop FROM users WHERE id = ?", (int(user_id),)).fetchone()
         if row is None:
@@ -361,7 +535,33 @@ def debit_balance(user_id: int, amount_cop: int, module: str, note: str) -> int:
             (new_balance, _utc_now_iso(), int(user_id)),
         )
         _add_ledger(conn, int(user_id), "debit", amount, module, note)
-        return new_balance
+        should_notify_low_balance = current > low_balance_threshold and new_balance <= low_balance_threshold
+        if should_notify_low_balance:
+            contact_row = conn.execute(
+                "SELECT email, first_name, last_name FROM users WHERE id = ?",
+                (int(user_id),),
+            ).fetchone()
+            if contact_row is not None:
+                low_balance_contact = {
+                    "email": str(contact_row["email"] or "").strip(),
+                    "first_name": str(contact_row["first_name"] or ""),
+                    "last_name": str(contact_row["last_name"] or ""),
+                }
+
+    if should_notify_low_balance and low_balance_contact and low_balance_contact.get("email"):
+        try:
+            send_low_balance_notification(
+                user_id=int(user_id),
+                email=str(low_balance_contact["email"]),
+                first_name=str(low_balance_contact["first_name"]),
+                last_name=str(low_balance_contact["last_name"]),
+                balance_cop=new_balance,
+                threshold_cop=low_balance_threshold,
+            )
+        except Exception:
+            pass
+
+    return new_balance
 
 
 def get_recent_ledger(user_id: int, limit: int = 50) -> list[dict]:

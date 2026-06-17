@@ -16,12 +16,16 @@ from ..services.auth_wallet import (
     get_user_balance,
     list_pending_recharge_payment_intents,
     require_authenticated_user,
+    send_payment_failed_notification,
+    send_payment_success_notification,
     set_recharge_payment_status,
     settle_recharge_if_approved,
 )
 from ..services.pricing_store import get_pricing_config, get_wompi_coverage_factor
 
 router = APIRouter(prefix="/payments", tags=["payments"])
+
+FAILED_PAYMENT_STATUSES = {"DECLINED", "ERROR", "VOIDED", "FAILED", "CANCELLED"}
 
 
 class WompiCheckoutRequest(BaseModel):
@@ -341,6 +345,17 @@ def confirm_wompi_payment(payload: WompiConfirmRequest, user: AuthenticatedUser 
     set_recharge_payment_status(reference, tx_status or "PENDING", tx_id, raw_payload)
 
     if tx_status != "APPROVED":
+        if tx_status in FAILED_PAYMENT_STATUSES:
+            try:
+                send_payment_failed_notification(
+                    user_id=int(intent["user_id"]),
+                    reference=reference,
+                    amount_cop=int(intent["amount_cop"]),
+                    status=tx_status,
+                    transaction_id=tx_id,
+                )
+            except Exception:
+                pass
         return {
             "ok": True,
             "credited": False,
@@ -353,6 +368,17 @@ def confirm_wompi_payment(payload: WompiConfirmRequest, user: AuthenticatedUser 
         raise HTTPException(status_code=400, detail="Monto aprobado menor al plan solicitado")
 
     settled = settle_recharge_if_approved(reference=reference, transaction_id=tx_id, gateway_payload=raw_payload)
+    if not bool(settled.get("already_applied")):
+        try:
+            send_payment_success_notification(
+                user_id=int(intent["user_id"]),
+                reference=reference,
+                amount_cop=int(intent["amount_cop"]),
+                balance_cop=int(settled.get("balance_cop") or 0),
+                transaction_id=tx_id,
+            )
+        except Exception:
+            pass
     return {
         "ok": True,
         "credited": True,
@@ -398,6 +424,17 @@ def sync_wompi_pending_payments(user: AuthenticatedUser = Depends(require_authen
         set_recharge_payment_status(reference, tx_status, tx_id, raw_payload)
 
         if tx_status != "APPROVED":
+            if tx_status in FAILED_PAYMENT_STATUSES:
+                try:
+                    send_payment_failed_notification(
+                        user_id=int(intent["user_id"]),
+                        reference=reference,
+                        amount_cop=int(intent["amount_cop"]),
+                        status=tx_status,
+                        transaction_id=tx_id,
+                    )
+                except Exception:
+                    pass
             details.append({"reference": reference, "status": tx_status})
             continue
 
@@ -409,6 +446,16 @@ def sync_wompi_pending_payments(user: AuthenticatedUser = Depends(require_authen
         settled = settle_recharge_if_approved(reference=reference, transaction_id=tx_id, gateway_payload=raw_payload)
         if not bool(settled.get("already_applied")):
             credited_count += 1
+            try:
+                send_payment_success_notification(
+                    user_id=int(intent["user_id"]),
+                    reference=reference,
+                    amount_cop=int(intent["amount_cop"]),
+                    balance_cop=int(settled.get("balance_cop") or 0),
+                    transaction_id=tx_id,
+                )
+            except Exception:
+                pass
         details.append({
             "reference": reference,
             "status": "APPROVED",
@@ -465,6 +512,17 @@ async def wompi_events_webhook(
     set_recharge_payment_status(reference, tx_status, tx_id, raw_payload)
 
     if tx_status != "APPROVED":
+        if tx_status in FAILED_PAYMENT_STATUSES:
+            try:
+                send_payment_failed_notification(
+                    user_id=int(intent["user_id"]),
+                    reference=reference,
+                    amount_cop=int(intent["amount_cop"]),
+                    status=tx_status,
+                    transaction_id=tx_id,
+                )
+            except Exception:
+                pass
         return {"ok": True, "credited": False, "status": tx_status, "reference": reference}
 
     expected_in_cents = int(intent.get("amount_in_cents") or 0)
@@ -472,6 +530,17 @@ async def wompi_events_webhook(
         return {"ok": True, "credited": False, "status": "APPROVED_SHORT", "reference": reference}
 
     settled = settle_recharge_if_approved(reference=reference, transaction_id=tx_id, gateway_payload=raw_payload)
+    if not bool(settled.get("already_applied")):
+        try:
+            send_payment_success_notification(
+                user_id=int(intent["user_id"]),
+                reference=reference,
+                amount_cop=int(intent["amount_cop"]),
+                balance_cop=int(settled.get("balance_cop") or 0),
+                transaction_id=tx_id,
+            )
+        except Exception:
+            pass
     return {
         "ok": True,
         "credited": True,
