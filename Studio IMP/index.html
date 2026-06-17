@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Studio IMP - Editor Online</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Anton&family=Bebas+Neue&family=Chakra+Petch:wght@400;500;600;700&family=Manrope:wght@400;500;700;800&family=Merriweather:wght@400;700&family=Montserrat:wght@400;600;700&family=Oswald:wght@400;500;700&family=Playfair+Display:wght@500;700&family=Poppins:wght@400;500;600;700&family=Rubik+Mono+One&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/studio-imp-static/styles.css" />
+  </head>
+  <body>
+    <div class="app-bg"></div>
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">Editor Online</p>
+        <h1>Studio IMP</h1>
+      </div>
+      <div class="topbar-actions">
+        <label class="import-btn" for="mediaInput">Importar Media</label>
+        <input id="mediaInput" type="file" accept="video/*,audio/*" multiple />
+        <select id="exportPreset" class="export-preset" aria-label="Formato de exportacion">
+          <option value="square">Cuadrado 1200 x 1200</option>
+          <option value="landscape" selected>Horizontal 16:9 1920 x 1080</option>
+          <option value="vertical">Vertical 9:16 1080 x 1920</option>
+        </select>
+        <select id="exportColorPreset" class="export-preset" aria-label="Color de exportacion social">
+          <option value="neutral" selected>Color: Neutral</option>
+          <option value="reels">Color: Reels Boost</option>
+          <option value="tiktok">Color: TikTok Punch</option>
+          <option value="youtube">Color: YouTube Clean</option>
+        </select>
+        <button id="undoBtn" class="secondary">Deshacer</button>
+        <button id="redoBtn" class="secondary">Rehacer</button>
+        <button id="exportMp4" class="secondary">Exportar MP4</button>
+        <span id="exportStatus" class="export-status">Listo</span>
+      </div>
+    </header>
+
+    <main class="workspace">
+      <aside class="panel left-panel">
+        <h2>Proyecto</h2>
+        <div class="card">
+          <p class="label">Archivo actual</p>
+          <p id="mediaName" class="value muted">Sin archivo cargado</p>
+          <p class="small-note" id="activeClipInfo">Sin clip seleccionado</p>
+          <p class="small-note">
+            Compatible con formatos que el navegador pueda reproducir (mp4, webm, mov,
+            mp3, wav, etc.).
+          </p>
+        </div>
+
+        <div class="card">
+          <p class="label">Medios del proyecto</p>
+          <ul id="mediaBin" class="media-bin"></ul>
+        </div>
+
+        <div class="card">
+          <p class="label">Duracion de corte</p>
+          <div class="row">
+            <label for="trimStart">Inicio</label>
+            <input id="trimStart" type="number" min="0" step="0.1" value="0" />
+          </div>
+          <div class="row">
+            <label for="trimEnd">Fin</label>
+            <input id="trimEnd" type="number" min="0" step="0.1" value="0" />
+          </div>
+          <button id="applyTrim" class="secondary">Aplicar recorte</button>
+        </div>
+
+        <div class="card">
+          <p class="label">Fundidos</p>
+          <div class="row">
+            <label for="videoFadeIn">Video Fade In</label>
+            <input id="videoFadeIn" type="number" min="0" step="0.1" value="1" />
+          </div>
+          <div class="row">
+            <label for="videoFadeOut">Video Fade Out</label>
+            <input id="videoFadeOut" type="number" min="0" step="0.1" value="1" />
+          </div>
+          <div class="row">
+            <label for="audioFadeIn">Audio Fade In</label>
+            <input id="audioFadeIn" type="number" min="0" step="0.1" value="1" />
+          </div>
+          <div class="row">
+            <label for="audioFadeOut">Audio Fade Out</label>
+            <input id="audioFadeOut" type="number" min="0" step="0.1" value="1" />
+          </div>
+        </div>
+      </aside>
+
+      <section class="center-stage">
+        <div class="preview-wrapper">
+          <video id="videoPreview" controls crossorigin="anonymous"></video>
+          <div id="fadeOverlay"></div>
+          <div id="textLayer"></div>
+          <div id="exportOverlay" class="export-overlay" aria-live="polite" aria-hidden="true">
+            <div class="export-overlay-card">
+              <p id="exportOverlayTitle" class="export-overlay-title">Rendering...</p>
+              <div class="export-overlay-bar">
+                <div id="exportOverlayFill" class="export-overlay-fill"></div>
+              </div>
+              <p id="exportOverlayPercent" class="export-overlay-percent">0%</p>
+              <p id="exportOverlayEta" class="export-overlay-eta">Tiempo restante: calculando...</p>
+            </div>
+          </div>
+        </div>
+        <div class="transport">
+          <button id="stopBtn" class="secondary">Stop</button>
+          <button id="playPause">Play</button>
+          <button id="pauseBtn" class="secondary">Pause</button>
+          <span id="timeDisplay">00:00 / 00:00</span>
+          <input
+            id="playhead"
+            type="range"
+            min="0"
+            max="100"
+            step="0.01"
+            value="0"
+            aria-label="Control de posicion de reproduccion"
+          />
+        </div>
+
+        <div class="timeline-card">
+          <div class="timeline-header">
+            <h3>Timeline</h3>
+            <div class="timeline-actions">
+              <button id="addVideoTrack" class="secondary">+ Video</button>
+              <button id="addAudioTrack" class="secondary">+ Audio</button>
+              <button id="addTextTrack" class="secondary">+ Texto</button>
+            </div>
+          </div>
+
+          <div class="timeline-toolbar">
+            <label for="timelineZoom">Zoom</label>
+            <input id="timelineZoom" type="range" min="40" max="220" step="5" value="80" />
+          </div>
+
+          <div class="timeline-scroll" id="timelineScroll">
+            <div class="timeline-canvas" id="timelineCanvas">
+              <div class="timeline-ruler" id="timelineRuler"></div>
+              <div class="timeline-playhead-line" id="timelinePlayheadLine"></div>
+
+              <div class="track-group">
+                <p class="group-title">Pistas de Video</p>
+                <div id="videoTracks"></div>
+              </div>
+
+              <div class="track-group">
+                <p class="group-title">Pistas de Audio</p>
+                <div id="audioTracks"></div>
+              </div>
+
+              <div class="track-group">
+                <p class="group-title">Pista de Textos</p>
+                <div id="textTracksTimeline"></div>
+              </div>
+            </div>
+          </div>
+
+          <p class="hint">Arrastra clips de izquierda a derecha, usa + para pistas nuevas y Eliminar para borrar pistas.</p>
+        </div>
+      </section>
+
+      <aside class="panel right-panel">
+        <h2>Inspector</h2>
+
+        <div class="card">
+          <p class="label">Filtros cinematograficos</p>
+          <select id="filterPreset" aria-label="Seleccion de filtro cinematografico">
+            <option value="none">Ninguno</option>
+            <option value="cinematicWarm">Cinematic Warm</option>
+            <option value="tealOrange">Teal & Orange</option>
+            <option value="monoNoir">Mono Noir</option>
+          </select>
+          <div class="row">
+            <label for="brightness">Brillo</label>
+            <input id="brightness" type="range" min="50" max="150" value="100" />
+          </div>
+          <div class="row">
+            <label for="contrast">Contraste</label>
+            <input id="contrast" type="range" min="50" max="180" value="100" />
+          </div>
+          <div class="row">
+            <label for="saturation">Saturacion</label>
+            <input id="saturation" type="range" min="0" max="180" value="100" />
+          </div>
+        </div>
+
+        <div class="card">
+          <p class="label">Textos en video</p>
+          <div class="timeline-actions">
+            <button id="addText" class="secondary">Agregar texto</button>
+            <button id="copyTextClip" class="secondary">Copiar</button>
+            <button id="pasteTextClip" class="secondary">Pegar</button>
+          </div>
+          <div id="textItems"></div>
+        </div>
+
+        <div class="card">
+          <p class="label">Audio con keyframes</p>
+          <div class="row">
+            <label for="baseVolume">Volumen base</label>
+            <input id="baseVolume" type="range" min="0" max="1" step="0.01" value="1" />
+          </div>
+          <button id="clearKeys" class="danger">Limpiar keyframes</button>
+          <ul id="keyframeList"></ul>
+        </div>
+      </aside>
+    </main>
+
+    <script src="/studio-imp-static/app.js"></script>
+  </body>
+</html>

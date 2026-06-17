@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>IA-IMP · Inicio</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/static/landing.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="topbar__brand">
+        <img src="/static/logo.png" alt="IA-IMP" class="topbar__logo" />
+        <span>IA-IMP</span>
+      </div>
+      <nav class="topbar__nav" aria-label="Navegacion principal">
+        <a href="#gallery">Galeria</a>
+        <a href="#modules">Modulos</a>
+        <a href="/studio">Abrir Studio</a>
+        <a href="/admin">Admin</a>
+      </nav>
+      <a class="topbar__cta" href="/studio">Entrar ahora</a>
+    </header>
+
+    <main class="landing">
+      <section class="hero" aria-label="Presentacion principal">
+        <div class="hero__media">
+          <video class="hero__video" autoplay muted loop preload="metadata">
+            <source src="https://cdn.coverr.co/videos/coverr-modern-villa-1576/1080p.mp4" type="video/mp4" />
+          </video>
+          <div class="hero__overlay"></div>
+        </div>
+
+        <div class="hero__content">
+          <p class="eyebrow">ARQUITECTURA IA · RENDERS · VIDEO · MUSICA · INFLUENCERS</p>
+          <h1>Lo que imaginas para tu proyecto, en formato visual realista.</h1>
+          <p class="hero__text">
+            Desde renders de arquitectura hasta videos cinematográficos, personajes realistas y música personalizada.
+            La pantalla inicial muestra ejemplos para que el usuario entienda lo que puede lograr en la plataforma.
+          </p>
+          <div class="hero__actions">
+            <a href="/studio" class="button button--primary">Comenzar</a>
+            <a href="#gallery" class="button button--secondary">Ver ejemplos</a>
+          </div>
+        </div>
+
+        <div class="hero__stack" aria-hidden="true">
+          <article class="media-card media-card--video">
+            <video autoplay muted loop preload="metadata">
+              <source src="https://cdn.coverr.co/videos/coverr-luxury-house-1579/1080p.mp4" type="video/mp4" />
+            </video>
+            <span>Video arquitectonico</span>
+          </article>
+          <article class="media-card"><img src="https://images.unsplash.com/photo-1600585154340-be6161a56a0c?auto=format&fit=crop&w=900&q=80" alt="Casa moderna" /></article>
+          <article class="media-card"><img src="https://images.unsplash.com/photo-1613977257593-487ecd136cc3?auto=format&fit=crop&w=900&q=80" alt="Interior arquitectonico" /></article>
+          <article class="media-card"><img src="https://images.unsplash.com/photo-1600607687939-ce8a6c25118c?auto=format&fit=crop&w=900&q=80" alt="Fachada premium" /></article>
+        </div>
+      </section>
+
+      <section id="gallery" class="gallery" aria-label="Galeria de resultados">
+        <div class="section-head">
+          <p>Ejemplos visuales</p>
+          <h2>Imagenes y videos creados para inspirar desde el inicio.</h2>
+        </div>
+        <div class="gallery__rail" id="galleryRail">
+          <div class="gallery__card"><img src="https://images.unsplash.com/photo-1512917774080-9991f1c4c750?auto=format&fit=crop&w=900&q=80" alt="Renders de arquitectura" /></div>
+          <div class="gallery__card"><img src="https://images.unsplash.com/photo-1558618666-fcd25c85cd64?auto=format&fit=crop&w=900&q=80" alt="Casa de lujo" /></div>
+          <div class="gallery__card"><video autoplay muted loop preload="metadata"><source src="https://cdn.coverr.co/videos/coverr-contemporary-house-1577/1080p.mp4" type="video/mp4" /></video></div>
+          <div class="gallery__card"><img src="https://images.unsplash.com/photo-1600047509807-ba8f99d2cdde?auto=format&fit=crop&w=900&q=80" alt="Interior moderno" /></div>
+          <div class="gallery__card"><video autoplay muted loop preload="metadata"><source src="https://cdn.coverr.co/videos/coverr-modern-building-1566/1080p.mp4" type="video/mp4" /></video></div>
+          <div class="gallery__card"><img src="https://images.unsplash.com/photo-1605276374104-dee2a0ed3cd6?auto=format&fit=crop&w=900&q=80" alt="Fachada minimalista" /></div>
+        </div>
+      </section>
+
+      <section id="modules" class="modules" aria-label="Modulos de la plataforma">
+        <div class="section-head">
+          <p>Lo que puede lograr el usuario</p>
+          <h2>Prompts y resultados pensados para arquitectura realista.</h2>
+        </div>
+        <div class="modules__grid">
+          <article class="module-card">
+            <h3>Imagen a Imagen</h3>
+            <p>Convierte capturas o bocetos en renders realistas.</p>
+            <code>Casa [ESTILO] en [CIUDAD], luz [MOMENTO], materiales [MATERIAL], fotografía editorial arquitectónica.</code>
+          </article>
+          <article class="module-card">
+            <h3>Imagen a Video</h3>
+            <p>Da movimiento cinematográfico a cualquier render.</p>
+            <code>Travelling suave alrededor de [PROYECTO], cámara estable, luz cinematográfica, sombras realistas.</code>
+          </article>
+          <article class="module-card">
+            <h3>Influencer IA</h3>
+            <p>Presentadores realistas para mostrar proyectos o marcas.</p>
+            <code>Presentador/a de [MARCA], mirada a cámara, microexpresiones naturales, iluminación de estudio cinematográfica.</code>
+          </article>
+          <article class="module-card">
+            <h3>Música IA</h3>
+            <p>Bandas sonoras para reels, presentaciones y videos.</p>
+            <code>Track para [TIPO_VIDEO], vibe [EMOCION], mezcla limpia, build-up elegante, cierre memorable.</code>
+          </article>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer" aria-label="Informacion legal">
+      <p>
+        2026 IMPORMADERAS - IA - IMP. Todos los derechos reservados - Cali Colombia / Desarrollador: Nilton Badel - Soporte WhatsApp (+57) 3127373544 - Email: publicidad@impormaderasltda.com
+      </p>
+    </footer>
+
+    <script>
+      const rail = document.getElementById("galleryRail");
+      if (rail) {
+        rail.innerHTML += rail.innerHTML;
+      }
+    </script>
+  </body>
+</html>

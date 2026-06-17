@@ -1,0 +1,843 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>IA Render Studio</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/static/studio.css" />
+  </head>
+  <body>
+    <div class="background-grid" aria-hidden="true"></div>
+    <section class="hero-stage" aria-label="Galeria inicial de arquitectura IA">
+      <div class="hero-stage__content">
+        <p class="hero-stage__kicker">ARQUITECTURA IA · PREVIA CINEMATICA</p>
+        <h2>Imagenes y videos para mostrar lo que tu estudio puede crear.</h2>
+        <p>
+          Muestra renders, recorridos y personajes realistas desde el inicio para que el usuario entienda el nivel visual de la plataforma.
+        </p>
+      </div>
+    </section>
+    <main class="layout">
+      <section class="panel panel-form">
+        <header class="brand-head">
+          <div class="brand-copy">
+            <p class="kicker">IMPORMADERAS</p>
+            <h1>IA-IMP</h1>
+            <p class="subtitle">Inteligencia artificial arquitectónica de IMPORMADERAS</p>
+          </div>
+          <div class="top-actions" aria-label="Acciones de cuenta y precios">
+            <div id="account-chip" class="account-chip" hidden>No has iniciado sesion</div>
+            <button id="btn-prices" type="button" class="top-action-btn">Precios</button>
+            <button id="btn-recharge" type="button" class="top-action-btn top-action-btn--ghost">Recarga</button>
+            <button id="btn-account" type="button" class="top-action-btn top-action-btn--ghost" hidden>Mi cuenta</button>
+            <button id="btn-studio-imp" type="button" class="top-action-btn" hidden>Studio IMP Gratis</button>
+            <button id="btn-login" type="button" class="top-action-btn top-action-btn--ghost">Iniciar sesión</button>
+            <button id="btn-logout" type="button" class="top-action-btn top-action-btn--ghost" hidden>Cerrar sesión</button>
+          </div>
+          <div class="logo-slot" aria-label="Espacio para logo">
+            <img src="/static/logo.png" alt="Logo IMPORMADERAS" />
+          </div>
+        </header>
+
+        <p class="intro">Elige un modo de trabajo para generar imagen o conversar con IA-IMP.</p>
+
+        <div class="mode-tabs" role="tablist" aria-label="Modos IA-IMP">
+          <button id="tab-img2img" class="mode-tab active" type="button" role="tab" aria-selected="true">Imagen a Imagen</button>
+          <button id="tab-img2vid" class="mode-tab" type="button" role="tab" aria-selected="false">Imagen a Video</button>
+          <button id="tab-influencer" class="mode-tab" type="button" role="tab" aria-selected="false">Influencer</button>
+          <button id="tab-txt2img" class="mode-tab" type="button" role="tab" aria-selected="false">Texto a Imagen</button>
+          <button id="tab-music" class="mode-tab" type="button" role="tab" aria-selected="false">Musica IA</button>
+          <button id="tab-chat" class="mode-tab" type="button" role="tab" aria-selected="false">Pachy IA</button>
+        </div>
+
+        <div id="mode-img2img" class="mode-pane active">
+          <form id="render-form" class="form" novalidate>
+            <label class="field">
+              <span>Captura de modelado</span>
+              <div id="drop-zone" class="drop-zone" tabindex="0" aria-label="Zona de imagen: pega con Ctrl+V, arrastra o haz clic para seleccionar">
+                <input id="image" name="file" type="file" accept="image/*" class="drop-zone__input" />
+                <div class="drop-zone__content">
+                  <span class="drop-zone__icon">&#128247;</span>
+                  <span class="drop-zone__label">Pega con <kbd>Ctrl+V</kbd>, arrastra o <span class="drop-zone__link">selecciona archivo</span></span>
+                  <span id="drop-zone-filename" class="drop-zone__filename"></span>
+                </div>
+                <img id="drop-zone-preview" class="drop-zone__preview" alt="" />
+              </div>
+            </label>
+
+            <section class="materials-section" aria-labelledby="materials-heading">
+              <div class="materials-head">
+                <h3 id="materials-heading">Materiales (1 a 2)</h3>
+                <span id="materials-count" class="materials-count">0/2</span>
+              </div>
+
+              <div class="grid-2">
+                <label class="field">
+                  <span>Modo de aplicación</span>
+                  <select id="material-mode" name="material_mode">
+                    <option value="mix" selected>Combinar</option>
+                    <option value="zones">Por zonas puntuales</option>
+                  </select>
+                </label>
+
+                <label class="field">
+                  <span>Catálogo</span>
+                  <p class="hint">Selecciona 1 o 2 materiales desde miniaturas.</p>
+                </label>
+              </div>
+
+              <label class="field">
+                <span>Instrucciones por zonas <span class="hint-inline">(solo si usas modo por zonas)</span></span>
+                <textarea id="material-plan" rows="2" placeholder="Ej: Amaretto en muro principal y Negro en zocalo inferior"></textarea>
+              </label>
+
+              <div id="materials-dropdown" class="materials-dropdown">
+                <button
+                  id="materials-toggle"
+                  class="materials-toggle"
+                  type="button"
+                  aria-expanded="false"
+                  aria-controls="materials-panel"
+                >
+                  <span>Ver catálogo de materiales</span>
+                  <span id="materials-toggle-icon" class="materials-toggle-icon">▾</span>
+                </button>
+                <div id="materials-panel" class="materials-panel" hidden>
+                  <div class="materials-search-wrap">
+                    <input
+                      id="materials-search"
+                      class="materials-search"
+                      type="search"
+                      placeholder="Buscar material o marca (ej: Arauco, Roble, Duratex)"
+                      autocomplete="off"
+                      spellcheck="false"
+                    />
+                  </div>
+                  <div id="materials-library" class="materials-grid" aria-live="polite"></div>
+                </div>
+              </div>
+
+              <div id="materials-selected" class="materials-selected" aria-live="polite"></div>
+            </section>
+
+            <label class="field">
+              <span>Prompt arquitectonico</span>
+              <textarea id="prompt" name="prompt" rows="5" required placeholder="Fachada brutalista de hormigon visto, luz de golden hour, vegetacion mediterranea, fotografia arquitectonica editorial"></textarea>
+            </label>
+
+            <label class="field">
+              <span>Negative prompt</span>
+              <input id="negative_prompt" name="negative_prompt" type="text" value="low quality, blurry, distorted geometry, cartoon" />
+            </label>
+
+            <div class="grid-2">
+              <label class="field">
+                <span>Estilo</span>
+                <select id="style" name="style">
+                  <option value="editorial">Editorial</option>
+                  <option value="commercial">Comercial</option>
+                  <option value="competition">Concurso</option>
+                  <option value="night">Nocturno</option>
+                  <option value="interior">Interior</option>
+                </select>
+              </label>
+
+              <label class="field">
+                <span>Iluminación</span>
+                <select id="lighting-mode" name="lighting_mode">
+                  <option value="morning">Mañana</option>
+                  <option value="afternoon" selected>Tarde</option>
+                  <option value="night">Noche</option>
+                </select>
+              </label>
+
+              <label class="field">
+                <span>Calidad</span>
+                <select id="quality" name="quality">
+                  <option value="fast">Rapida</option>
+                  <option value="balanced" selected>Balanceada</option>
+                  <option value="ultra">Ultra (mas detalle)</option>
+                </select>
+              </label>
+
+              <label class="field">
+                <span>Semilla</span>
+                <input id="seed" name="seed" type="number" min="0" placeholder="Opcional" />
+              </label>
+            </div>
+
+            <p class="hint">Tip: no pongas "photorealistic" en negative prompt, porque contradice el objetivo.</p>
+
+            <div class="grid-2">
+              <label class="field">
+                <span>Steps</span>
+                <input id="steps" name="steps" type="number" min="10" max="80" value="35" />
+              </label>
+
+              <label class="field">
+                <span>Guidance</span>
+                <input id="guidance_scale" name="guidance_scale" type="number" min="1" max="20" step="0.1" value="7.5" />
+              </label>
+            </div>
+
+            <button id="submit-btn" type="submit">Generar Render</button>
+          </form>
+        </div>
+
+        <div id="mode-img2vid" class="mode-pane" hidden>
+          <div class="chat-help">Puedes usar la ultima imagen generada o cargar una nueva captura para convertirla a video.</div>
+
+          <label class="field">
+            <span>Imagen base para video <span class="hint-inline">(opcional)</span></span>
+            <div id="anim-drop-zone" class="drop-zone" tabindex="0" aria-label="Zona de imagen para video: pega con Ctrl+V, arrastra o haz clic para seleccionar">
+              <input id="anim-image" name="anim_file" type="file" accept="image/*" class="drop-zone__input" />
+              <div class="drop-zone__content">
+                <span class="drop-zone__icon">&#127916;</span>
+                <span class="drop-zone__label">Pega con <kbd>Ctrl+V</kbd>, arrastra o <span class="drop-zone__link">selecciona archivo</span></span>
+                <span id="anim-drop-zone-filename" class="drop-zone__filename"></span>
+              </div>
+              <img id="anim-drop-zone-preview" class="drop-zone__preview" alt="" />
+            </div>
+            <p class="hint">Si no cargas una imagen aqui, se usara la ultima imagen completada del panel Resultado.</p>
+          </label>
+
+          <div id="animate-panel" class="animate-panel">
+            <h3 class="animate-title">Animar resultado</h3>
+            <label class="field">
+              <span>Descripcion del movimiento <span class="hint-inline">(opcional)</span></span>
+              <textarea id="anim-prompt" rows="2" placeholder="Camara recorre suavemente la fachada, brisa en vegetacion, luz cinematica de atardecer"></textarea>
+            </label>
+
+            <div class="animate-models">
+              <label class="field field--inline">
+                <span>Modelo de video</span>
+                <select id="anim-model">
+                  <option value="kwaivgi/kling-v3-video" selected>Kling V3 Cinematic (hasta 15s)</option>
+                  <option value="wan-video/wan-2.2-i2v-fast">Wan 2.2 I2V Fast (rapido, economico)</option>
+                  <option value="wan-video/wan-2.5-i2v-fast">Wan 2.5 I2V Fast (mayor calidad)</option>
+                  <option value="minimax/video-01-live">Minimax Video-01 Live (animacion)</option>
+                </select>
+              </label>
+
+              <label class="field field--inline">
+                <span>Duracion</span>
+                <select id="anim-duration">
+                  <option value="5" selected>5 segundos</option>
+                  <option value="8">8 segundos</option>
+                  <option value="15">15 segundos</option>
+                </select>
+              </label>
+            </div>
+
+            <p class="model-note">Puedes elegir el motor de video según presupuesto/calidad. Duración disponible: 5s, 8s o 15s.</p>
+
+            <button id="anim-btn" type="button" class="btn-animate">&#9654; Generar video</button>
+
+            <p id="anim-status" class="status idle" hidden>Esperando...</p>
+
+            <div id="anim-progress-wrap" class="progress-wrap" hidden>
+              <div class="progress-meta">
+                <span id="anim-stage">Etapa: en espera</span>
+              </div>
+              <div class="progress-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+                <div id="anim-progress-fill" class="progress-fill"></div>
+              </div>
+              <p id="anim-progress-text" class="progress-text">0%</p>
+            </div>
+
+            <video id="anim-video" class="anim-video" controls loop muted hidden></video>
+            <a id="anim-download" class="download disabled" href="#" download hidden>Descargar video MP4</a>
+          </div>
+        </div>
+
+        <div id="mode-influencer" class="mode-pane" hidden>
+          <form id="influencer-form" class="form" novalidate>
+            <p class="model-note">Modo realista estricto activo: salida cinematica fotorealista con lip-sync natural. Solo personajes creados/originales, sin famosos ni personas reales sin autorizacion.</p>
+
+            <label class="field">
+              <span>Imagen del personaje</span>
+              <div id="influencer-image-zone" class="drop-zone" tabindex="0" aria-label="Zona de imagen influencer: pega con Ctrl+V, arrastra o haz clic para seleccionar">
+                <input id="influencer-image" type="file" accept="image/*" class="drop-zone__input" />
+                <div class="drop-zone__content">
+                  <span class="drop-zone__icon">&#128100;</span>
+                  <span class="drop-zone__label">Pega con <kbd>Ctrl+V</kbd>, arrastra o <span class="drop-zone__link">selecciona archivo</span></span>
+                  <span id="influencer-image-filename" class="drop-zone__filename"></span>
+                </div>
+                <img id="influencer-image-preview" class="drop-zone__preview" alt="" />
+              </div>
+            </label>
+
+            <label class="field">
+              <span>Video guia (maximo 15s)</span>
+              <div id="influencer-video-zone" class="drop-zone" tabindex="0" aria-label="Zona de video influencer: arrastra o haz clic para seleccionar">
+                <input id="influencer-video" type="file" accept="video/*" class="drop-zone__input" />
+                <div class="drop-zone__content">
+                  <span class="drop-zone__icon">&#127909;</span>
+                  <span class="drop-zone__label">Arrastra o <span class="drop-zone__link">selecciona video</span></span>
+                  <span id="influencer-video-filename" class="drop-zone__filename"></span>
+                </div>
+              </div>
+              <video id="influencer-video-preview" class="anim-video" controls muted hidden></video>
+            </label>
+
+            <label class="field">
+              <span>Dirección escénica <span class="hint-inline">(opcional)</span></span>
+              <textarea id="influencer-instruction" rows="2" placeholder="Ej: Mantener expresion natural, tono cercano, mirada directa a camara"></textarea>
+            </label>
+
+            <div class="grid-2">
+              <label class="field">
+                <span>Resolución</span>
+                <select id="influencer-resolution">
+                  <option value="1080p" selected>1080p (fijo realista)</option>
+                </select>
+              </label>
+
+              <label class="field">
+                <span>FPS</span>
+                <select id="influencer-fps">
+                  <option value="24" selected>24 fps (fijo cinematográfico)</option>
+                </select>
+              </label>
+            </div>
+
+            <label class="field consent-check">
+              <span>
+                <input id="influencer-consent" type="checkbox" />
+                Confirmo que tengo derechos/consentimiento del material y no suplanto a terceros sin autorizacion.
+              </span>
+            </label>
+
+            <button id="influencer-generate-btn" type="submit">Generar Influencer</button>
+
+            <p id="influencer-status" class="status idle">Listo para generar</p>
+            <div id="influencer-progress-wrap" class="progress-wrap" hidden>
+              <div class="progress-meta">
+                <span id="influencer-stage">Etapa: en espera</span>
+              </div>
+              <div class="progress-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+                <div id="influencer-progress-fill" class="progress-fill"></div>
+              </div>
+              <p id="influencer-progress-text" class="progress-text">0%</p>
+            </div>
+
+            <video id="influencer-result-video" class="anim-video" controls loop hidden></video>
+            <a id="influencer-download" class="download disabled" href="#" download hidden>Descargar video influencer</a>
+          </form>
+        </div>
+
+        <div id="mode-txt2img" class="mode-pane" hidden>
+          <form id="text-form" class="form" novalidate>
+            <label class="field">
+              <span>Prompt para imagen</span>
+              <textarea id="t2i-prompt" rows="6" required placeholder="Casa minimalista de madera, fachadas limpias, paisaje andino, luz cinematica suave"></textarea>
+            </label>
+
+            <p class="model-note">Coloca tu prompt aquí. No uses <strong>Negative Prompt</strong> ni <strong>Guidance</strong>.</p>
+
+            <div class="grid-2">
+              <label class="field">
+                <span>Estilo</span>
+                <select id="t2i-style">
+                  <option value="editorial">Editorial</option>
+                  <option value="commercial">Comercial</option>
+                  <option value="competition">Concurso</option>
+                  <option value="night">Nocturno</option>
+                  <option value="interior">Interior</option>
+                </select>
+              </label>
+
+              <label class="field">
+                <span>Iluminación</span>
+                <select id="t2i-lighting-mode">
+                  <option value="morning">Mañana</option>
+                  <option value="afternoon" selected>Tarde</option>
+                  <option value="night">Noche</option>
+                </select>
+              </label>
+
+              <label class="field">
+                <span>Calidad</span>
+                <select id="t2i-quality">
+                  <option value="fast">Rapida</option>
+                  <option value="balanced" selected>Balanceada</option>
+                  <option value="ultra">Ultra (mas detalle)</option>
+                </select>
+              </label>
+
+              <label class="field">
+                <span>Semilla</span>
+                <input id="t2i-seed" type="number" min="0" placeholder="Opcional" />
+              </label>
+            </div>
+
+            <div class="grid-2">
+              <label class="field">
+                <span>Steps</span>
+                <input id="t2i-steps" type="number" min="1" max="4" value="4" />
+              </label>
+            </div>
+
+            <button id="text-submit-btn" type="submit">Generar Imagen desde Texto</button>
+          </form>
+        </div>
+
+        <div id="mode-music" class="mode-pane" hidden>
+          <form id="music-form" class="form" novalidate>
+            <p class="model-note">Modo musical alineado con Replicate (meta/musicgen): prompt + duracion + preferencias del usuario.</p>
+
+            <div class="grid-2">
+              <label class="field">
+                <span>Tipo</span>
+                <select id="music-type" name="mode">
+                  <option value="instrumental" selected>Instrumental</option>
+                  <option value="song">Cancion con letra</option>
+                </select>
+              </label>
+
+              <label class="field">
+                <span>Duracion</span>
+                <select id="music-duration" name="duration_seconds">
+                  <option value="8">8 segundos</option>
+                  <option value="15" selected>15 segundos</option>
+                  <option value="30">30 segundos</option>
+                </select>
+              </label>
+            </div>
+
+            <label class="field">
+              <span>Genero musical</span>
+              <input id="music-genre" name="genre" type="text" value="pop cinematica" placeholder="Ej: synthwave, house, lofi, reggaeton, cinematic" />
+            </label>
+
+            <div class="grid-2">
+              <label class="field">
+                <span>Mood</span>
+                <input id="music-mood" name="mood" type="text" value="epico y emocional" placeholder="Ej: upbeat, melancolico, enérgico" />
+              </label>
+
+              <label class="field">
+                <span>BPM (opcional)</span>
+                <input id="music-bpm" name="bpm" type="number" min="60" max="180" placeholder="Ej: 120" />
+              </label>
+            </div>
+
+            <label class="field">
+              <span>Instrumentos clave</span>
+              <input id="music-instruments" name="instruments" type="text" value="synth bass, drums, piano" placeholder="Ej: guitarra nylon, pad analogico, 808" />
+            </label>
+
+            <label class="field">
+              <span>Gustos / Referencias del usuario</span>
+              <textarea id="music-taste" name="user_taste" rows="3" placeholder="Ej: mezcla limpia, hook pegajoso, drop potente, estilo comercial"></textarea>
+            </label>
+
+            <div class="grid-2">
+              <label class="field">
+                <span>Idioma de letra</span>
+                <select id="music-language" name="language">
+                  <option value="es" selected>Espanol</option>
+                  <option value="en">English</option>
+                </select>
+              </label>
+
+              <label class="field">
+                <span>Tema para cancion</span>
+                <input id="music-theme" name="theme" type="text" value="superacion personal" placeholder="Ej: amor, fiesta, motivacion" />
+              </label>
+            </div>
+
+            <label class="field">
+              <span>Letra personalizada (opcional)</span>
+              <textarea id="music-lyrics" name="custom_lyrics" rows="4" placeholder="Si pones texto aqui, se usa como base para la cancion completa"></textarea>
+            </label>
+
+            <button id="music-generate-btn" type="submit">Generar Musica</button>
+          </form>
+        </div>
+
+        <div id="mode-chat" class="mode-pane" hidden>
+          <div class="chat-help">Consulta ideas de diseño, materiales, costos aproximados, logos, excels, Word o propuestas de prompt.</div>
+          <form id="chat-form" class="form" novalidate>
+            <label class="field">
+              <span>Escribe tu consulta</span>
+              <textarea id="chat-input" rows="5" placeholder="Ejemplo: crea una carta formal de presentación en Word, un excel descargable de cotización o un logo moderno para una carpintería"></textarea>
+            </label>
+            <div class="chat-attach-row">
+              <button id="chat-attach-btn" class="chat-attach-btn" type="button" aria-label="Adjuntar archivos">📎 Añadir fotos y archivos</button>
+              <input id="chat-attach-input" type="file" multiple hidden />
+              <span id="chat-attach-hint" class="hint">Hasta 5 archivos, 10 MB por archivo</span>
+            </div>
+            <div id="chat-attach-list" class="chat-attach-list" aria-live="polite"></div>
+            <button id="chat-send-btn" type="submit">Enviar a Pachy IA</button>
+          </form>
+        </div>
+      </section>
+
+      <section class="panel panel-preview">
+        <div id="result-shell">
+          <div class="preview-head">
+            <h2>Resultado</h2>
+            <p id="status" class="status idle">Esperando render...</p>
+          </div>
+
+          <div class="progress-wrap" aria-live="polite">
+            <div class="progress-meta">
+              <span id="stage">Etapa: en espera</span>
+              <span id="eta">ETA: --</span>
+            </div>
+            <div class="progress-bar" role="progressbar" aria-label="Progreso de render" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+              <div id="progress-fill" class="progress-fill"></div>
+            </div>
+            <p id="progress-text" class="progress-text">0%</p>
+          </div>
+
+          <div class="canvas-wrap">
+            <figure class="canvas-card">
+              <figcaption>Entrada</figcaption>
+              <img id="input-preview" alt="Preview de entrada" />
+            </figure>
+
+            <figure class="canvas-card">
+              <figcaption>Salida</figcaption>
+              <img id="output-preview" alt="Preview de salida" />
+            </figure>
+          </div>
+
+          <a id="download-link" class="download disabled" href="#" download>Descargar PNG</a>
+        </div>
+
+        <div id="music-shell" class="music-shell" hidden>
+          <div class="preview-head">
+            <h2>Audio generado</h2>
+            <p id="music-status" class="status idle">Listo para generar</p>
+          </div>
+
+          <div id="music-progress-wrap" class="progress-wrap" hidden>
+            <div class="progress-meta">
+              <span id="music-stage">Etapa: en espera</span>
+            </div>
+            <div class="progress-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+              <div id="music-progress-fill" class="progress-fill"></div>
+            </div>
+            <p id="music-progress-text" class="progress-text">0%</p>
+          </div>
+
+          <p id="music-meta" class="hint">Configura genero, mood y gustos para crear instrumentales o canciones personalizadas.</p>
+          <audio id="music-player" class="music-player" controls hidden></audio>
+          <a id="music-download" class="download disabled" href="#" download hidden>Descargar MP3</a>
+        </div>
+
+        <div id="chat-shell" class="chat-shell" hidden>
+          <div class="preview-head">
+            <h2>Pachy IA</h2>
+            <p id="chat-status" class="status idle">Listo</p>
+          </div>
+          <div id="chat-messages" class="chat-messages"></div>
+        </div>
+      </section>
+    </main>
+
+    <section class="examples-stage" aria-label="Ejemplos generados IA-IMP">
+      <div id="examples-grid" class="hero-stage__mosaic" aria-label="Panel de ejemplos desde carpeta Contenido">
+        <article class="hero-stage__tile hero-stage__tile--empty hero-stage__tile--wide">
+          <p>Cargando ejemplos de Contenido...</p>
+        </article>
+      </div>
+    </section>
+
+    <footer class="studio-footer" aria-label="Informacion legal y contacto">
+      <p>
+        2026 IMMPORMADERAS - IA - IMP. Todos los derechos reservados - Cali Colombia, programador: Nilton Badel - Soporte WhatsApp (+57) 3127373544 - Email: publicidad@impormaderasltda.com
+      </p>
+    </footer>
+
+    <div id="prices-modal" class="modal" hidden aria-hidden="true" role="dialog" aria-labelledby="prices-title">
+      <div class="modal__backdrop" data-close-prices="true"></div>
+      <section class="modal__card" role="document">
+        <header class="modal__head">
+          <h3 id="prices-title">Tarifario IA-IMP</h3>
+          <button id="prices-close" type="button" class="modal__close" aria-label="Cerrar">✕</button>
+        </header>
+        <p id="prices-note" class="hint">Valores finales por generación en COP.</p>
+
+        <div class="prices-table-wrap">
+          <table class="prices-table">
+            <thead>
+              <tr>
+                <th>Modulo</th>
+                <th>Precio IA-IMP (COP)</th>
+              </tr>
+            </thead>
+            <tbody id="prices-table-body"></tbody>
+          </table>
+        </div>
+
+        <h4 class="modal__subhead">Imagen a Video por motor (5s / 8s / 15s)</h4>
+        <div class="prices-table-wrap">
+          <table class="prices-table">
+            <thead>
+              <tr>
+                <th>Motor</th>
+                <th>Duración</th>
+                <th>Precio IA-IMP (COP)</th>
+              </tr>
+            </thead>
+            <tbody id="prices-video-body"></tbody>
+          </table>
+        </div>
+
+        <h4 class="modal__subhead">Musica IA por duración (8s / 15s / 30s)</h4>
+        <div class="prices-table-wrap">
+          <table class="prices-table">
+            <thead>
+              <tr>
+                <th>Duración</th>
+                <th>Precio IA-IMP (COP)</th>
+              </tr>
+            </thead>
+            <tbody id="prices-music-body"></tbody>
+          </table>
+        </div>
+
+        <h4 class="modal__subhead">Planes de recarga</h4>
+        <div class="prices-table-wrap">
+          <table class="prices-table">
+            <thead>
+              <tr>
+                <th>Recarga</th>
+                <th>Valor a pagar</th>
+                <th>Capacidad destacada</th>
+              </tr>
+            </thead>
+            <tbody id="prices-recharge-body"></tbody>
+          </table>
+        </div>
+
+        <h4 class="modal__subhead">Capacidad por plan (aprox.)</h4>
+        <div id="prices-plan-banners" class="plan-banners"></div>
+      </section>
+    </div>
+
+    <div id="recharge-modal" class="modal" hidden aria-hidden="true" role="dialog" aria-labelledby="recharge-title">
+      <div class="modal__backdrop" data-close-recharge="true"></div>
+      <section class="modal__card" role="document">
+        <header class="modal__head">
+          <h3 id="recharge-title">Recarga tu cuenta</h3>
+          <button id="recharge-close" type="button" class="modal__close" aria-label="Cerrar">✕</button>
+        </header>
+        <p id="recharge-note" class="hint">Selecciona un plan de recarga.</p>
+
+        <form id="recharge-form" class="form" novalidate>
+          <label class="field">
+            <span>Plan de recarga (COP)</span>
+            <select id="recharge-amount">
+              <option value="5000">5.000 COP</option>
+              <option value="10000">10.000 COP</option>
+              <option value="15000">15.000 COP</option>
+              <option value="20000">20.000 COP</option>
+              <option value="25000">25.000 COP</option>
+              <option value="30000">30.000 COP</option>
+              <option value="35000">35.000 COP</option>
+              <option value="40000">40.000 COP</option>
+              <option value="45000">45.000 COP</option>
+              <option value="50000">50.000 COP</option>
+            </select>
+          </label>
+
+          <div class="prices-table-wrap">
+            <table class="prices-table">
+              <thead>
+                <tr>
+                  <th>Concepto</th>
+                  <th>Valor</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Valor a pagar</td>
+                  <td id="recharge-pay-value">$ 5.000</td>
+                </tr>
+                <tr>
+                  <td>Saldo acreditado</td>
+                  <td id="recharge-credit-value">$ 5.000</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div id="recharge-plan-capacity" class="hint"></div>
+
+          <button id="recharge-submit" type="submit">¡Recargar ahora!</button>
+        </form>
+      </section>
+    </div>
+
+    <div id="auth-modal" class="modal" hidden aria-hidden="true" role="dialog" aria-labelledby="auth-title">
+      <div class="modal__backdrop" data-close-auth="true"></div>
+      <section class="modal__card auth-modal-card" role="document">
+        <header class="modal__head">
+          <h3 id="auth-title">Cuenta IA-IMP</h3>
+          <button id="auth-close" type="button" class="modal__close" aria-label="Cerrar">✕</button>
+        </header>
+
+        <div class="auth-tabs" role="tablist" aria-label="Tipo de acceso">
+          <button id="auth-tab-login" type="button" class="auth-tab auth-tab--active" role="tab" aria-selected="true">Ingresar</button>
+          <button id="auth-tab-register" type="button" class="auth-tab" role="tab" aria-selected="false">Registrarse</button>
+        </div>
+
+        <form id="auth-form" class="form" novalidate>
+          <div id="auth-register-fields" hidden>
+            <div class="grid-2">
+              <label class="field">
+                <span>Nombres</span>
+                <input id="auth-first-name" type="text" minlength="2" maxlength="80" autocomplete="given-name" placeholder="Tus nombres" />
+              </label>
+              <label class="field">
+                <span>Apellidos</span>
+                <input id="auth-last-name" type="text" minlength="2" maxlength="80" autocomplete="family-name" placeholder="Tus apellidos" />
+              </label>
+            </div>
+
+            <label class="field">
+              <span>Email</span>
+              <input id="auth-email" type="email" maxlength="120" autocomplete="email" placeholder="tucorreo@dominio.com" />
+            </label>
+          </div>
+
+          <label class="field">
+            <span>Email</span>
+            <input id="auth-login" type="email" maxlength="120" autocomplete="email" placeholder="Ej: tucorreo@dominio.com" required />
+          </label>
+
+          <label class="field">
+            <span>Contraseña</span>
+            <input id="auth-password" type="password" minlength="6" autocomplete="current-password" placeholder="Minimo 6 caracteres" required />
+          </label>
+
+          <label id="auth-confirm-wrap" class="field" hidden>
+            <span>Confirma Contraseña</span>
+            <input id="auth-password-confirm" type="password" minlength="6" autocomplete="new-password" placeholder="Repite la contraseña" />
+          </label>
+
+          <div id="auth-recover-wrap" class="field" hidden>
+            <p class="hint">Escribe tu correo registrado y te enviaremos un enlace para cambiar la contraseña.</p>
+            <label class="field">
+              <span>Email para recuperación</span>
+              <input id="auth-recover-email" type="email" maxlength="120" autocomplete="email" placeholder="tucorreo@dominio.com" />
+            </label>
+          </div>
+
+          <div id="auth-reset-wrap" class="field" hidden>
+            <p class="hint">Crea una nueva contraseña usando el enlace que recibiste por email.</p>
+            <label class="field">
+              <span>Token de recuperación</span>
+              <input id="auth-reset-token" type="text" autocomplete="off" placeholder="Token del correo" />
+            </label>
+            <label class="field">
+              <span>Nueva contraseña</span>
+              <input id="auth-reset-password" type="password" minlength="6" autocomplete="new-password" placeholder="Nueva contraseña" />
+            </label>
+            <label class="field">
+              <span>Confirmar nueva contraseña</span>
+              <input id="auth-reset-password-confirm" type="password" minlength="6" autocomplete="new-password" placeholder="Repite la nueva contraseña" />
+            </label>
+          </div>
+
+          <button id="auth-submit" type="submit">Ingresar</button>
+          <button id="auth-recover-toggle" type="button" class="ghost-button">Recuperar contraseña</button>
+        </form>
+
+        <p id="auth-status" class="status idle">Ingresa con tu email para generar y recargar saldo.</p>
+      </section>
+    </div>
+
+    <div id="account-modal" class="modal" hidden aria-hidden="true" role="dialog" aria-labelledby="account-title">
+      <div class="modal__backdrop" data-close-account="true"></div>
+      <section class="modal__card" role="document">
+        <header class="modal__head">
+          <h3 id="account-title">Mi cuenta</h3>
+          <button id="account-close" type="button" class="modal__close" aria-label="Cerrar">✕</button>
+        </header>
+
+        <h4 class="modal__subhead">Perfil</h4>
+        <form id="account-profile-form" class="form" novalidate>
+          <div class="grid-2">
+            <label class="field">
+              <span>Nombres</span>
+              <input id="account-first-name" type="text" minlength="2" maxlength="80" required />
+            </label>
+            <label class="field">
+              <span>Apellidos</span>
+              <input id="account-last-name" type="text" minlength="2" maxlength="80" required />
+            </label>
+          </div>
+
+          <div class="grid-2">
+            <label class="field">
+              <span>Email</span>
+              <input id="account-email" type="email" maxlength="120" required />
+            </label>
+            <label class="field">
+              <span>Celular</span>
+              <input id="account-phone" type="tel" maxlength="20" placeholder="Ej: +573001234567" />
+            </label>
+          </div>
+
+          <label class="field">
+            <span>Usuario</span>
+            <input id="account-username" type="text" minlength="3" maxlength="32" required />
+          </label>
+
+          <button id="account-profile-submit" type="submit">Actualizar perfil</button>
+        </form>
+        <p id="account-profile-status" class="status idle">Puedes actualizar tu perfil cuando quieras.</p>
+
+        <h4 class="modal__subhead">Saldo</h4>
+        <p id="account-balance" class="hint">Saldo actual: --</p>
+
+        <h4 class="modal__subhead">Cambiar contraseña</h4>
+        <form id="account-password-form" class="form" novalidate>
+          <div class="grid-2">
+            <label class="field">
+              <span>Contraseña actual</span>
+              <input id="account-current-password" type="password" minlength="6" autocomplete="current-password" required />
+            </label>
+            <label class="field">
+              <span>Nueva contraseña</span>
+              <input id="account-new-password" type="password" minlength="6" autocomplete="new-password" required />
+            </label>
+          </div>
+
+          <label class="field">
+            <span>Confirmar nueva contraseña</span>
+            <input id="account-confirm-password" type="password" minlength="6" autocomplete="new-password" required />
+          </label>
+
+          <button id="account-password-submit" type="submit">Actualizar contraseña</button>
+        </form>
+        <p id="account-password-status" class="status idle">Puedes actualizar tu contraseña cuando quieras.</p>
+
+        <h4 class="modal__subhead">Historial de generaciones</h4>
+        <div class="prices-table-wrap">
+          <table class="prices-table">
+            <thead>
+              <tr>
+                <th>Fecha</th>
+                <th>Modulo</th>
+                <th>Estado</th>
+                <th>Costo</th>
+              </tr>
+            </thead>
+            <tbody id="account-generations-body"></tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+
+    <script src="/static/studio.js" defer></script>
+  </body>
+</html>

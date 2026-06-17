@@ -1,0 +1,269 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>IA-IMP · Administrador</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/static/admin.css" />
+  </head>
+  <body>
+    <div class="admin-bg" aria-hidden="true"></div>
+
+    <header class="admin-topbar">
+      <div>
+        <p class="admin-kicker">PANEL DE CONTROL</p>
+        <h1>Administración IA-IMP</h1>
+      </div>
+      <div class="admin-topbar__actions">
+        <span id="admin-session-chip" class="admin-chip" hidden></span>
+        <button id="admin-refresh" type="button" class="admin-btn admin-btn--ghost">Actualizar</button>
+        <button id="admin-logout" type="button" class="admin-btn admin-btn--ghost" hidden>Cerrar sesión</button>
+      </div>
+    </header>
+
+    <main class="admin-shell">
+      <section id="admin-login-shell" class="admin-card admin-login">
+        <div class="admin-login__copy">
+          <p class="admin-kicker">Acceso restringido</p>
+          <h2>Ingresa como administrador</h2>
+          <p>
+            Desde aquí puedes revisar usuarios, saldos y actividad por módulos, pero solo ajustar el saldo.
+          </p>
+        </div>
+
+        <form id="admin-login-form" class="admin-form" novalidate>
+          <label class="admin-field">
+            <span>Usuario</span>
+            <input id="admin-login" type="text" autocomplete="username" placeholder="admin" required />
+          </label>
+
+          <label class="admin-field">
+            <span>Contraseña</span>
+            <input id="admin-password" type="password" autocomplete="current-password" placeholder="••••••••" required />
+          </label>
+
+          <button class="admin-btn admin-btn--primary" type="submit">Entrar al panel</button>
+          <p id="admin-login-status" class="admin-status">Usa las credenciales de administrador configuradas en el sistema.</p>
+        </form>
+      </section>
+
+      <section id="admin-dashboard" class="admin-dashboard" hidden>
+        <section class="admin-metrics">
+          <article class="metric-card">
+            <span>Usuarios</span>
+            <strong id="metric-users">0</strong>
+          </article>
+          <article class="metric-card">
+            <span>Saldo total</span>
+            <strong id="metric-balance">$0</strong>
+          </article>
+          <article class="metric-card">
+            <span>Generaciones</span>
+            <strong id="metric-generations">0</strong>
+          </article>
+          <article class="metric-card">
+            <span>Módulos activos</span>
+            <strong id="metric-modules">0</strong>
+          </article>
+        </section>
+
+        <section class="admin-card pricing-card">
+          <div class="section-head section-head--stacked">
+            <div>
+              <p class="admin-kicker">Tarifas</p>
+              <h2>Editar precios globales</h2>
+            </div>
+            <span class="detail-chip">Fuente compartida con toda la plataforma</span>
+          </div>
+          <p class="admin-note">Ajusta valores en COP como en el botón Precios de IA-IMP. Se guarda para toda la plataforma.</p>
+
+          <div class="pricing-forms-grid">
+            <section class="pricing-form-card">
+              <h3>Precios por módulo (COP)</h3>
+              <div class="admin-field-grid">
+                <label class="admin-field"><span>Imagen a imagen</span><input id="price-img2img" type="number" min="0" step="10" /></label>
+                <label class="admin-field"><span>Materiales IA</span><input id="price-materials" type="number" min="0" step="10" /></label>
+                <label class="admin-field"><span>Texto a imagen</span><input id="price-text2img" type="number" min="0" step="10" /></label>
+                <label class="admin-field"><span>Influencer IA</span><input id="price-influencer" type="number" min="0" step="10" /></label>
+                <label class="admin-field"><span>Pachy IA (chat)</span><input id="price-chat" type="number" min="0" step="10" /></label>
+              </div>
+            </section>
+
+            <section class="pricing-form-card">
+              <h3>Música IA por duración (COP)</h3>
+              <div class="admin-field-grid admin-field-grid--three">
+                <label class="admin-field"><span>8 segundos</span><input id="price-music-8" type="number" min="0" step="10" /></label>
+                <label class="admin-field"><span>15 segundos</span><input id="price-music-15" type="number" min="0" step="10" /></label>
+                <label class="admin-field"><span>30 segundos</span><input id="price-music-30" type="number" min="0" step="10" /></label>
+              </div>
+            </section>
+
+            <section class="pricing-form-card">
+              <h3>Imagen a video por motor y duración (COP)</h3>
+              <div class="table-wrap">
+                <table class="admin-table compact-table">
+                  <thead>
+                    <tr>
+                      <th>Motor</th>
+                      <th>5s</th>
+                      <th>8s</th>
+                      <th>15s</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td>Kling V3 Pro</td>
+                      <td><input id="price-i2v-kling-5" type="number" min="0" step="10" /></td>
+                      <td><input id="price-i2v-kling-8" type="number" min="0" step="10" /></td>
+                      <td><input id="price-i2v-kling-15" type="number" min="0" step="10" /></td>
+                    </tr>
+                    <tr>
+                      <td>Wan 2.2 I2V Fast</td>
+                      <td><input id="price-i2v-wan22-5" type="number" min="0" step="10" /></td>
+                      <td><input id="price-i2v-wan22-8" type="number" min="0" step="10" /></td>
+                      <td><input id="price-i2v-wan22-15" type="number" min="0" step="10" /></td>
+                    </tr>
+                    <tr>
+                      <td>Wan 2.5 I2V Fast</td>
+                      <td><input id="price-i2v-wan25-5" type="number" min="0" step="10" /></td>
+                      <td><input id="price-i2v-wan25-8" type="number" min="0" step="10" /></td>
+                      <td><input id="price-i2v-wan25-15" type="number" min="0" step="10" /></td>
+                    </tr>
+                    <tr>
+                      <td>Minimax Video-01 Live</td>
+                      <td><input id="price-i2v-minimax-5" type="number" min="0" step="10" /></td>
+                      <td><input id="price-i2v-minimax-8" type="number" min="0" step="10" /></td>
+                      <td><input id="price-i2v-minimax-15" type="number" min="0" step="10" /></td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          </div>
+
+          <div class="admin-inline-actions">
+            <button id="admin-pricing-refresh" type="button" class="admin-btn admin-btn--ghost">Recargar precios</button>
+            <button id="admin-pricing-save" type="button" class="admin-btn admin-btn--primary">Guardar precios</button>
+            <button id="admin-pricing-advanced-toggle" type="button" class="admin-btn admin-btn--ghost">Modo avanzado (JSON)</button>
+          </div>
+
+          <section id="admin-pricing-advanced" class="pricing-advanced" hidden>
+            <label class="admin-field">
+              <span>Configuración avanzada (JSON)</span>
+              <textarea id="admin-pricing-json" class="admin-textarea" rows="14" spellcheck="false"></textarea>
+            </label>
+          </section>
+
+          <p id="admin-pricing-status" class="admin-status">Cargando configuración...</p>
+        </section>
+
+        <div class="admin-grid">
+          <section class="admin-card users-card">
+            <div class="section-head">
+              <div>
+                <p class="admin-kicker">Usuarios registrados</p>
+                <h2>Listado general</h2>
+              </div>
+              <label class="admin-search">
+                <span>Buscar</span>
+                <input id="admin-search" type="search" placeholder="Nombre, email o usuario" />
+              </label>
+            </div>
+
+            <div class="table-wrap">
+              <table class="admin-table">
+                <thead>
+                  <tr>
+                    <th>Usuario</th>
+                    <th>Email</th>
+                    <th>Saldo</th>
+                    <th>Generaciones</th>
+                    <th>Módulos</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody id="admin-users-body"></tbody>
+              </table>
+            </div>
+          </section>
+
+          <aside class="admin-card detail-card">
+            <div class="section-head section-head--stacked">
+              <div>
+                <p class="admin-kicker">Detalle</p>
+                <h2>Usuario seleccionado</h2>
+              </div>
+              <span id="admin-selected-id" class="detail-chip">Sin selección</span>
+            </div>
+
+            <div id="admin-detail-empty" class="detail-empty">
+              Selecciona un usuario para ver su resumen y modificar solo el saldo.
+            </div>
+
+            <div id="admin-detail-panel" hidden>
+              <div class="detail-profile">
+                <h3 id="admin-detail-name">-</h3>
+                <p id="admin-detail-email">-</p>
+                <p id="admin-detail-meta">-</p>
+              </div>
+
+              <div class="detail-summary">
+                <div>
+                  <span>Saldo actual</span>
+                  <strong id="admin-detail-balance">$0</strong>
+                </div>
+                <div>
+                  <span>Total generaciones</span>
+                  <strong id="admin-detail-total">0</strong>
+                </div>
+              </div>
+
+              <div>
+                <p class="detail-label">Módulos generados</p>
+                <div id="admin-detail-modules" class="badge-row"></div>
+              </div>
+
+              <form id="admin-balance-form" class="admin-form admin-form--compact" novalidate>
+                <label class="admin-field">
+                  <span>Nuevo saldo</span>
+                  <input id="admin-balance-input" type="number" min="0" step="1" required />
+                </label>
+                <label class="admin-field">
+                  <span>Nota</span>
+                  <input id="admin-balance-note" type="text" maxlength="180" value="Saldo ajustado por administrador" />
+                </label>
+                <button class="admin-btn admin-btn--primary" type="submit">Guardar saldo</button>
+                <p class="admin-note">Solo se permite editar el saldo. No se cambian contraseñas ni otros datos.</p>
+              </form>
+
+              <div>
+                <div class="section-head section-head--small">
+                  <p class="detail-label">Historial de generaciones</p>
+                  <span id="admin-detail-history-count" class="detail-chip">0 registros</span>
+                </div>
+                <div class="history-wrap">
+                  <table class="history-table">
+                    <thead>
+                      <tr>
+                        <th>Fecha</th>
+                        <th>Módulo</th>
+                        <th>Estado</th>
+                        <th>Valor</th>
+                      </tr>
+                    </thead>
+                    <tbody id="admin-detail-generations"></tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </aside>
+        </div>
+      </section>
+    </main>
+
+    <script src="/static/admin.js"></script>
+  </body>
+</html>
