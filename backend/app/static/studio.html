@@ -762,7 +762,10 @@
       <section class="modal__card" role="document">
         <header class="modal__head">
           <h3 id="account-title">Mi cuenta</h3>
-          <button id="account-close" type="button" class="modal__close" aria-label="Cerrar">✕</button>
+          <div class="modal__head-actions">
+            <button id="account-delete-top-btn" type="button" class="danger-action-btn danger-action-btn--compact">Eliminar cuenta</button>
+            <button id="account-close" type="button" class="modal__close" aria-label="Cerrar">✕</button>
+          </div>
         </header>
 
         <h4 class="modal__subhead">Perfil</h4>
@@ -823,6 +826,13 @@
         </form>
         <p id="account-password-status" class="status idle">Puedes actualizar tu contraseña cuando quieras.</p>
 
+        <h4 class="modal__subhead">Zona de riesgo</h4>
+        <div class="account-danger-zone">
+          <p class="hint">Si eliminas tu cuenta, perderas el saldo disponible y todo tu historial de generaciones.</p>
+          <button id="account-delete-btn" type="button" class="danger-action-btn">Eliminar mi cuenta</button>
+        </div>
+        <p id="account-delete-status" class="status idle">Esta accion es permanente y no se puede deshacer.</p>
+
         <h4 class="modal__subhead">Historial de generaciones</h4>
         <div class="prices-table-wrap">
           <table class="prices-table">
@@ -832,12 +842,31 @@
                 <th>Modulo</th>
                 <th>Estado</th>
                 <th>Costo</th>
+                <th>Archivo</th>
               </tr>
             </thead>
             <tbody id="account-generations-body"></tbody>
           </table>
         </div>
       </section>
+    </div>
+
+    <!-- ── Confirm dialog ──────────────────────────────────────────── -->
+    <div id="confirm-dialog" class="confirm-dialog" hidden aria-hidden="true" role="alertdialog" aria-modal="true" aria-labelledby="confirm-dialog-title">
+      <div class="confirm-dialog__backdrop"></div>
+      <div class="confirm-dialog__card">
+        <div class="confirm-dialog__icon" id="confirm-dialog-icon" aria-hidden="true"></div>
+        <h4 id="confirm-dialog-title" class="confirm-dialog__title"></h4>
+        <p id="confirm-dialog-body" class="confirm-dialog__body"></p>
+        <div id="confirm-dialog-input-wrap" class="confirm-dialog__input-wrap" hidden>
+          <label id="confirm-dialog-input-label" for="confirm-dialog-input" class="confirm-dialog__input-label"></label>
+          <input id="confirm-dialog-input" type="text" class="confirm-dialog__input" autocomplete="off" spellcheck="false" />
+        </div>
+        <div class="confirm-dialog__actions">
+          <button id="confirm-dialog-cancel" type="button" class="ghost-button">Cancelar</button>
+          <button id="confirm-dialog-ok" type="button" class="danger-action-btn confirm-dialog__ok-btn"></button>
+        </div>
+      </div>
     </div>
 
     <script src="/static/studio.js" defer></script>

@@ -20,7 +20,7 @@ USERNAME_RE = re.compile(r"^[a-zA-Z0-9._-]{3,32}$")
 PHONE_RE = re.compile(r"^\+?[0-9]{7,15}$")
 EMAIL_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
-ISOTIPO_PATH = PROJECT_ROOT / "Iconos" / "Isotipo IA-IMP.png"
+EMAIL_HEADER_LOGO_PATH = PROJECT_ROOT / "Iconos" / "IA-IMP.png"
 
 
 class InsufficientBalanceError(Exception):
@@ -872,6 +872,45 @@ def get_user_by_email(email: str) -> dict | None:
         return _public_user(row)
 
 
+def delete_user_account(user_id: int) -> dict:
+    uid = int(user_id)
+    with _get_conn() as conn:
+        row = conn.execute(
+            "SELECT id, email, balance_cop FROM users WHERE id = ?",
+            (uid,),
+        ).fetchone()
+        if row is None:
+            raise ValueError("Usuario no encontrado")
+
+        safe_email = str(row["email"] or "")
+        balance_before = int(row["balance_cop"] or 0)
+
+        payment_refs_rows = conn.execute(
+            "SELECT reference FROM recharge_payments WHERE user_id = ?",
+            (uid,),
+        ).fetchall()
+        payment_refs = [str(item["reference"] or "").strip() for item in payment_refs_rows if str(item["reference"] or "").strip()]
+
+        conn.execute("DELETE FROM sessions WHERE user_id = ?", (uid,))
+        conn.execute("DELETE FROM wallet_ledger WHERE user_id = ?", (uid,))
+        conn.execute("DELETE FROM password_reset_tokens WHERE user_id = ?", (uid,))
+        conn.execute("DELETE FROM recharge_payments WHERE user_id = ?", (uid,))
+        conn.execute("DELETE FROM users WHERE id = ?", (uid,))
+
+        conn.execute("DELETE FROM notification_events WHERE event_key = ?", (f"registration-success:{uid}",))
+        for ref in payment_refs:
+            conn.execute("DELETE FROM notification_events WHERE event_key = ?", (f"payment-success:{ref}",))
+            conn.execute("DELETE FROM notification_events WHERE event_key LIKE ?", (f"payment-failed:{ref}:%",))
+
+    return {
+        "ok": True,
+        "user_id": uid,
+        "email": safe_email,
+        "balance_before": balance_before,
+        "deleted_payment_refs": len(payment_refs),
+    }
+
+
 def create_password_reset_token(user_id: int, email: str, minutes_valid: int = 60) -> str:
     token = secrets.token_urlsafe(32)
     now = datetime.now(timezone.utc)
@@ -951,9 +990,9 @@ def send_email_notification(to_email: str, subject: str, body: str, html_body: s
 
     if html_body:
         message.add_alternative(html_body, subtype="html")
-        if ISOTIPO_PATH.exists():
+        if EMAIL_HEADER_LOGO_PATH.exists():
             try:
-                logo_bytes = ISOTIPO_PATH.read_bytes()
+                logo_bytes = EMAIL_HEADER_LOGO_PATH.read_bytes()
                 html_part = message.get_payload()[-1]
                 html_part.add_related(
                     logo_bytes,

@@ -143,9 +143,14 @@ def list_user_generation_history(user_id: int, limit: int = 100) -> list[dict[st
         elif not payload.get("input_image"):
             module = "text2img"
 
+        out_path = str(payload.get("output_image") or "")
+        has_file = bool(out_path and Path(out_path).exists())
+
         items.append(
             {
                 "id": str(job_id),
+                "output_type": "job",
+                "has_file": has_file,
                 "module": module,
                 "status": str(payload.get("status") or "unknown"),
                 "amount_cop": int(payload.get("billed_amount_cop") or 0),
@@ -164,9 +169,14 @@ def list_user_generation_history(user_id: int, limit: int = 100) -> list[dict[st
             continue
 
         module = "influencer" if str(payload.get("kind") or "") == "influencer" else "img2vid"
+        vid_path = str(payload.get("video_output") or "")
+        has_file = bool(vid_path and Path(vid_path).exists())
+
         items.append(
             {
                 "id": str(anim_id),
+                "output_type": "anim",
+                "has_file": has_file,
                 "module": module,
                 "status": str(payload.get("status") or "unknown"),
                 "amount_cop": int(payload.get("billed_amount_cop") or 0),
@@ -184,9 +194,14 @@ def list_user_generation_history(user_id: int, limit: int = 100) -> list[dict[st
         if int(payload.get("billed_user_id") or 0) != uid:
             continue
 
+        aud_path = str(payload.get("audio_output") or "")
+        has_file = bool(aud_path and Path(aud_path).exists())
+
         items.append(
             {
                 "id": str(music_id),
+                "output_type": "music",
+                "has_file": has_file,
                 "module": "music",
                 "status": str(payload.get("status") or "unknown"),
                 "amount_cop": int(payload.get("billed_amount_cop") or 0),
@@ -201,3 +216,133 @@ def list_user_generation_history(user_id: int, limit: int = 100) -> list[dict[st
 
     items.sort(key=lambda x: str(x.get("updated_at") or x.get("created_at") or ""), reverse=True)
     return items[:safe_limit]
+
+
+def get_user_generation_download(user_id: int, output_type: str, output_id: str) -> tuple[Path, str]:
+    """Returns (file_path, download_filename). Raises ValueError on ownership/not-found/unavailable."""
+    uid = int(user_id)
+    safe_id = str(output_id).strip()
+    safe_type = str(output_type).strip().lower()
+
+    if safe_type == "job":
+        record = _load_jobs().get(safe_id)
+        if record is None:
+            raise ValueError("Generacion no encontrada")
+        if int(record.get("billed_user_id") or 0) != uid:
+            raise ValueError("No tienes permiso para descargar este archivo")
+        raw_path = str(record.get("output_image") or "")
+        if not raw_path:
+            raise ValueError("Archivo no disponible: la generacion aun no ha terminado")
+        p = Path(raw_path)
+        if not p.exists():
+            raise ValueError("Archivo expirado: Railway reinicio el contenedor. Vuelvelo a generar.")
+        seq = record.get("sequence") or safe_id[:8]
+        filename = f"IA-IMP-{seq}{p.suffix or '.png'}"
+        return p, filename
+
+    if safe_type == "anim":
+        record = _load_anims().get(safe_id)
+        if record is None:
+            raise ValueError("Generacion no encontrada")
+        if int(record.get("billed_user_id") or 0) != uid:
+            raise ValueError("No tienes permiso para descargar este archivo")
+        raw_path = str(record.get("video_output") or "")
+        if not raw_path:
+            raise ValueError("Archivo no disponible: el video aun no ha terminado")
+        p = Path(raw_path)
+        if not p.exists():
+            raise ValueError("Archivo expirado: Railway reinicio el contenedor. Vuelvelo a generar.")
+        filename = f"IA-IMP-video-{safe_id[:8]}.mp4"
+        return p, filename
+
+    if safe_type == "music":
+        record = _load_music().get(safe_id)
+        if record is None:
+            raise ValueError("Generacion no encontrada")
+        if int(record.get("billed_user_id") or 0) != uid:
+            raise ValueError("No tienes permiso para descargar este archivo")
+        raw_path = str(record.get("audio_output") or "")
+        if not raw_path:
+            raise ValueError("Archivo no disponible: el audio aun no ha terminado")
+        p = Path(raw_path)
+        if not p.exists():
+            raise ValueError("Archivo expirado: Railway reinicio el contenedor. Vuelvelo a generar.")
+        mode = str(record.get("mode") or "music")
+        filename = f"IA-IMP-{mode}-{safe_id[:8]}.mp3"
+        return p, filename
+
+    raise ValueError("Tipo de generacion invalido")
+
+
+def _safe_unlink(path_value: Any) -> bool:
+    raw = str(path_value or "").strip()
+    if not raw:
+        return False
+
+    try:
+        target = Path(raw)
+        if target.exists() and target.is_file():
+            target.unlink()
+            return True
+    except Exception:
+        return False
+
+    return False
+
+
+def delete_user_generation_data(user_id: int) -> dict[str, int]:
+    uid = int(user_id)
+
+    deleted_jobs = 0
+    deleted_anims = 0
+    deleted_music = 0
+    deleted_files = 0
+
+    jobs = _load_jobs()
+    kept_jobs: dict[str, Any] = {}
+    for job_id, payload in jobs.items():
+        if int(payload.get("billed_user_id") or 0) != uid:
+            kept_jobs[job_id] = payload
+            continue
+
+        deleted_jobs += 1
+        deleted_files += int(_safe_unlink(payload.get("input_image")))
+        deleted_files += int(_safe_unlink(payload.get("output_image")))
+
+    if len(kept_jobs) != len(jobs):
+        _save_jobs(kept_jobs)
+
+    anims = _load_anims()
+    kept_anims: dict[str, Any] = {}
+    for anim_id, payload in anims.items():
+        if int(payload.get("billed_user_id") or 0) != uid:
+            kept_anims[anim_id] = payload
+            continue
+
+        deleted_anims += 1
+        deleted_files += int(_safe_unlink(payload.get("source_image")))
+        deleted_files += int(_safe_unlink(payload.get("source_video")))
+        deleted_files += int(_safe_unlink(payload.get("video_output")))
+
+    if len(kept_anims) != len(anims):
+        _save_anims(kept_anims)
+
+    music_items = _load_music()
+    kept_music: dict[str, Any] = {}
+    for music_id, payload in music_items.items():
+        if int(payload.get("billed_user_id") or 0) != uid:
+            kept_music[music_id] = payload
+            continue
+
+        deleted_music += 1
+        deleted_files += int(_safe_unlink(payload.get("audio_output")))
+
+    if len(kept_music) != len(music_items):
+        _save_music(kept_music)
+
+    return {
+        "deleted_jobs": deleted_jobs,
+        "deleted_anims": deleted_anims,
+        "deleted_music": deleted_music,
+        "deleted_files": deleted_files,
+    }

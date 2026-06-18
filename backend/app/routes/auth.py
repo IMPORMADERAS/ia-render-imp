@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from ..services.auth_wallet import (
@@ -9,6 +10,7 @@ from ..services.auth_wallet import (
     create_password_reset_notification,
     create_session,
     credit_balance,
+    delete_user_account,
     delete_session,
     get_user_by_email,
     get_user_profile,
@@ -21,7 +23,7 @@ from ..services.auth_wallet import (
     send_registration_success_notification,
     update_user_profile,
 )
-from ..services.storage import list_user_generation_history
+from ..services.storage import delete_user_generation_data, get_user_generation_download, list_user_generation_history
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -65,6 +67,10 @@ class UpdateProfileRequest(BaseModel):
     email: str
     phone: str = ""
     username: str
+
+
+class DeleteAccountRequest(BaseModel):
+    confirm: bool
 
 
 def _session_cookie_max_age(days: int = 30) -> int:
@@ -247,3 +253,47 @@ def update_profile(payload: UpdateProfileRequest, user: AuthenticatedUser = Depe
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     return {"ok": True, "user": profile}
+
+
+@router.get("/downloads/{output_type}/{output_id}")
+def download_generation(
+    output_type: str,
+    output_id: str,
+    user: AuthenticatedUser = Depends(require_authenticated_user),
+):
+    VALID_TYPES = {"job", "anim", "music"}
+    if output_type not in VALID_TYPES:
+        raise HTTPException(status_code=400, detail="Tipo de generacion invalido")
+
+    try:
+        file_path, filename = get_user_generation_download(user.user_id, output_type, output_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    import mimetypes as _mt
+    media_type = _mt.guess_type(str(file_path))[0] or "application/octet-stream"
+    return FileResponse(path=str(file_path), media_type=media_type, filename=filename)
+
+
+@router.post("/delete-account", response_model=dict)
+def delete_account(
+    payload: DeleteAccountRequest,
+    response: Response,
+    user: AuthenticatedUser = Depends(require_authenticated_user),
+    session_token: str | None = Cookie(default=None, alias=SESSION_COOKIE_NAME),
+):
+    if not bool(payload.confirm):
+        raise HTTPException(status_code=400, detail="Debes confirmar la eliminacion de la cuenta")
+
+    storage_summary = delete_user_generation_data(user.user_id)
+    account_summary = delete_user_account(user.user_id)
+
+    delete_session(session_token or "")
+    response.delete_cookie(SESSION_COOKIE_NAME)
+
+    return {
+        "ok": True,
+        "message": "Cuenta eliminada correctamente",
+        "account": account_summary,
+        "storage": storage_summary,
+    }

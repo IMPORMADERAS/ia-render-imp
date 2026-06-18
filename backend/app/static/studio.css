@@ -1205,6 +1205,12 @@ h2 {
   margin-bottom: 0.6rem;
 }
 
+.modal__head-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
 .modal__head h3 {
   margin: 0;
   font-size: 1rem;
@@ -1251,6 +1257,165 @@ h2 {
 .account-kv strong {
   color: #fff;
   font-weight: 700;
+}
+
+.account-danger-zone {
+  border: 1px solid rgba(240, 62, 62, 0.32);
+  background: rgba(240, 62, 62, 0.08);
+  border-radius: 10px;
+  padding: 0.7rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.danger-action-btn {
+  margin: 0;
+  padding: 0.62rem 0.92rem;
+  border-radius: 9px;
+  border: 1px solid rgba(240, 62, 62, 0.45);
+  background: rgba(240, 62, 62, 0.16);
+  color: #ffd7d7;
+  font-size: 0.84rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.danger-action-btn:hover:not(:disabled) {
+  background: rgba(240, 62, 62, 0.24);
+  box-shadow: 0 0 14px rgba(240, 62, 62, 0.22);
+  transform: none;
+}
+
+.danger-action-btn--compact {
+  padding: 0.34rem 0.62rem;
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+/* ── Custom confirm dialog ───────────────────────────────────────────── */
+.confirm-dialog {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: grid;
+  place-items: center;
+}
+
+.confirm-dialog__backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.72);
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
+}
+
+.confirm-dialog__card {
+  position: relative;
+  z-index: 1;
+  width: min(440px, 92vw);
+  border-radius: 16px;
+  border: 1px solid rgba(240, 62, 62, 0.28);
+  background: #141414;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(255,255,255,0.04);
+  padding: 1.6rem 1.4rem 1.3rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  animation: confirm-dialog-in 0.18s ease;
+}
+
+@keyframes confirm-dialog-in {
+  from { opacity: 0; transform: scale(0.93) translateY(6px); }
+  to   { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+.confirm-dialog__icon {
+  font-size: 2.2rem;
+  line-height: 1;
+  text-align: center;
+  margin-bottom: 0.15rem;
+  filter: drop-shadow(0 0 10px rgba(240, 62, 62, 0.5));
+}
+
+.confirm-dialog__title {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: #fff;
+  text-align: center;
+}
+
+.confirm-dialog__body {
+  margin: 0.3rem 0 0.2rem;
+  font-size: 0.86rem;
+  color: var(--text-2, #aaa);
+  line-height: 1.6;
+  text-align: center;
+}
+
+.confirm-dialog__body strong {
+  color: #ffd7d7;
+}
+
+.confirm-dialog__input-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin-top: 0.4rem;
+}
+
+.confirm-dialog__input-label {
+  font-size: 0.8rem;
+  color: var(--text-2, #aaa);
+  text-align: center;
+}
+
+.confirm-dialog__input-label strong {
+  color: #ffd7d7;
+  font-family: monospace;
+  letter-spacing: 0.06em;
+}
+
+.confirm-dialog__input {
+  width: 100%;
+  text-align: center;
+  letter-spacing: 0.12em;
+  font-size: 0.95rem;
+  font-weight: 700;
+  font-family: monospace;
+  background: rgba(240, 62, 62, 0.07);
+  border: 1px solid rgba(240, 62, 62, 0.28);
+  color: #ffd7d7;
+  border-radius: 8px;
+  padding: 0.55rem 0.7rem;
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.confirm-dialog__input:focus {
+  border-color: rgba(240, 62, 62, 0.6);
+  box-shadow: 0 0 0 3px rgba(240, 62, 62, 0.14);
+}
+
+.confirm-dialog__actions {
+  display: flex;
+  gap: 0.6rem;
+  margin-top: 0.7rem;
+}
+
+.confirm-dialog__actions .ghost-button {
+  flex: 1;
+}
+
+.confirm-dialog__ok-btn {
+  flex: 1;
+}
+
+.confirm-dialog__ok-btn:disabled {
+  opacity: 0.36;
+  cursor: not-allowed;
+  pointer-events: none;
 }
 
 .auth-tabs {
@@ -1302,6 +1467,41 @@ h2 {
   font-size: 0.73rem;
   text-transform: uppercase;
   letter-spacing: 0.04em;
+}
+
+.gen-file-cell {
+  white-space: nowrap;
+}
+
+.gen-file-cell--none {
+  color: rgba(255, 255, 255, 0.25);
+}
+
+.gen-file-cell--expired {
+  color: rgba(255, 200, 80, 0.7);
+  font-size: 0.78rem;
+  cursor: help;
+}
+
+.gen-download-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.24rem 0.55rem;
+  border-radius: 7px;
+  border: 1px solid rgba(31, 200, 108, 0.32);
+  background: rgba(31, 200, 108, 0.1);
+  color: #a8ffd4;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-decoration: none;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.gen-download-btn:hover {
+  background: rgba(31, 200, 108, 0.2);
+  border-color: rgba(31, 200, 108, 0.55);
+  color: #d5ffe8;
 }
 
 .price-badge {

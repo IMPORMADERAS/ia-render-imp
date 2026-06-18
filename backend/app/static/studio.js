@@ -160,6 +160,7 @@ const authSubmit = document.getElementById("auth-submit");
 const authStatus = document.getElementById("auth-status");
 const accountModal = document.getElementById("account-modal");
 const accountClose = document.getElementById("account-close");
+const accountDeleteTopBtn = document.getElementById("account-delete-top-btn");
 const accountProfileForm = document.getElementById("account-profile-form");
 const accountFirstName = document.getElementById("account-first-name");
 const accountLastName = document.getElementById("account-last-name");
@@ -175,6 +176,8 @@ const accountNewPassword = document.getElementById("account-new-password");
 const accountConfirmPassword = document.getElementById("account-confirm-password");
 const accountPasswordSubmit = document.getElementById("account-password-submit");
 const accountPasswordStatus = document.getElementById("account-password-status");
+const accountDeleteBtn = document.getElementById("account-delete-btn");
+const accountDeleteStatus = document.getElementById("account-delete-status");
 const accountGenerationsBody = document.getElementById("account-generations-body");
 
 let pollingTimer = null;
@@ -845,6 +848,12 @@ function setAccountProfileStatus(text, state = "idle") {
   accountProfileStatus.className = `status ${state}`;
 }
 
+function setAccountDeleteStatus(text, state = "idle") {
+  if (!accountDeleteStatus) return;
+  accountDeleteStatus.textContent = text;
+  accountDeleteStatus.className = `status ${state}`;
+}
+
 function formatDate(value) {
   if (!value) return "--";
   const date = new Date(value);
@@ -871,16 +880,36 @@ function renderAccountSummary(data) {
     accountGenerationsBody.innerHTML = "";
     if (!generations.length) {
       const row = document.createElement("tr");
-      row.innerHTML = `<td colspan="4">Aun no hay generaciones registradas.</td>`;
+      row.innerHTML = `<td colspan="5">Aun no hay generaciones registradas.</td>`;
       accountGenerationsBody.appendChild(row);
     } else {
       for (const item of generations.slice(0, 120)) {
         const row = document.createElement("tr");
+        const outputType = String(item.output_type || "");
+        const outputId = String(item.id || "");
+        const hasFile = Boolean(item.has_file);
+        const isCompleted = String(item.status || "").toLowerCase() === "completed";
+
+        let fileCell = `<td class="gen-file-cell gen-file-cell--none">—</td>`;
+        if (isCompleted && outputType && outputId) {
+          if (hasFile) {
+            fileCell = `<td class="gen-file-cell">
+              <a class="gen-download-btn"
+                 href="/auth/downloads/${encodeURIComponent(outputType)}/${encodeURIComponent(outputId)}"
+                 download
+                 title="Descargar archivo">⬇ Descargar</a>
+            </td>`;
+          } else {
+            fileCell = `<td class="gen-file-cell gen-file-cell--expired" title="El archivo fue eliminado cuando Railway reinicio el contenedor. Configurar un Railway Volume evita esto.">⏳ Expirado</td>`;
+          }
+        }
+
         row.innerHTML = `
           <td>${formatDate(item.updated_at || item.created_at)}</td>
           <td>${item.module || "-"}</td>
           <td>${item.status || "-"}</td>
           <td>${formatCop(Number(item.amount_cop || 0))}</td>
+          ${fileCell}
         `;
         accountGenerationsBody.appendChild(row);
       }
@@ -913,8 +942,143 @@ async function openAccountModal() {
 
   setAccountProfileStatus("Puedes actualizar tu perfil cuando quieras.", "idle");
   setAccountPasswordStatus("Puedes actualizar tu contraseña cuando quieras.", "idle");
+  setAccountDeleteStatus("Esta accion es permanente y no se puede deshacer.", "idle");
   accountModal.hidden = false;
   accountModal.setAttribute("aria-hidden", "false");
+}
+
+function showConfirmDialog({ title, body, okLabel = "Confirmar", icon = "⚠️", inputRequired = false, inputMatch = "" }) {
+  return new Promise((resolve) => {
+    const dialog = document.getElementById("confirm-dialog");
+    const titleEl = document.getElementById("confirm-dialog-title");
+    const bodyEl = document.getElementById("confirm-dialog-body");
+    const iconEl = document.getElementById("confirm-dialog-icon");
+    const inputWrap = document.getElementById("confirm-dialog-input-wrap");
+    const inputLabelEl = document.getElementById("confirm-dialog-input-label");
+    const inputEl = document.getElementById("confirm-dialog-input");
+    const cancelBtn = document.getElementById("confirm-dialog-cancel");
+    const okBtn = document.getElementById("confirm-dialog-ok");
+
+    if (!dialog || !titleEl || !bodyEl || !okBtn || !cancelBtn) {
+      resolve(window.confirm(`${title}\n\n${body.replace(/<[^>]*>/g, "")}`));
+      return;
+    }
+
+    titleEl.textContent = title;
+    bodyEl.innerHTML = body;
+    iconEl.textContent = icon;
+    okBtn.textContent = okLabel;
+
+    if (inputRequired && inputWrap && inputLabelEl && inputEl) {
+      inputWrap.hidden = false;
+      inputLabelEl.innerHTML = `Escribe <strong>${inputMatch}</strong> para confirmar:`;
+      inputEl.value = "";
+      inputEl.placeholder = inputMatch;
+      okBtn.disabled = true;
+    } else {
+      if (inputWrap) inputWrap.hidden = true;
+      okBtn.disabled = false;
+    }
+
+    dialog.hidden = false;
+    dialog.setAttribute("aria-hidden", "false");
+
+    function validate() {
+      if (!inputRequired || !inputEl) return true;
+      return inputEl.value.trim().toUpperCase() === String(inputMatch).toUpperCase();
+    }
+
+    function onInput() {
+      okBtn.disabled = !validate();
+    }
+
+    function cleanup(result) {
+      dialog.hidden = true;
+      dialog.setAttribute("aria-hidden", "true");
+      if (inputEl) inputEl.removeEventListener("input", onInput);
+      cancelBtn.removeEventListener("click", onCancel);
+      okBtn.removeEventListener("click", onOk);
+      resolve(result);
+    }
+
+    function onCancel() { cleanup(false); }
+    function onOk() { if (!validate()) return; cleanup(true); }
+
+    if (inputRequired && inputEl) {
+      inputEl.addEventListener("input", onInput);
+      requestAnimationFrame(() => inputEl.focus());
+    } else {
+      requestAnimationFrame(() => okBtn.focus());
+    }
+
+    cancelBtn.addEventListener("click", onCancel);
+    okBtn.addEventListener("click", onOk);
+  });
+}
+
+async function deleteCurrentAccount() {
+  if (!currentUser) {
+    openAuthModal("login");
+    return;
+  }
+
+  const balance = formatCop(Number(currentUser.balance_cop || 0));
+
+  const firstOk = await showConfirmDialog({
+    icon: "⚠️",
+    title: "¿Eliminar tu cuenta?",
+    body: `Esta acción es <strong>permanente e irreversible</strong>.<br><br>Perderás tu saldo de <strong>${balance}</strong> y todo tu historial de generaciones.`,
+    okLabel: "Continuar",
+  });
+  if (!firstOk) return;
+
+  const secondOk = await showConfirmDialog({
+    icon: "🗑️",
+    title: "Confirmación final",
+    body: `Una vez eliminada, <strong>no podrás recuperar tu cuenta</strong> ni tu saldo.<br><br>Escribe <strong>ELIMINAR</strong> para confirmar:`,
+    okLabel: "Eliminar cuenta",
+    inputRequired: true,
+    inputMatch: "ELIMINAR",
+  });
+  if (!secondOk) return;
+
+  if (accountDeleteBtn) accountDeleteBtn.disabled = true;
+  if (accountDeleteTopBtn) accountDeleteTopBtn.disabled = true;
+  setAccountDeleteStatus("Eliminando tu cuenta...", "idle");
+
+  try {
+    const resp = await fetch("/auth/delete-account", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ confirm: true }),
+    });
+
+    if (!resp.ok) {
+      const err = await readApiError(resp);
+      throw new Error(err || "No se pudo eliminar la cuenta");
+    }
+
+    closeAccountModal();
+    currentUser = null;
+    updateAuthUi();
+    stopWompiSyncLoop();
+    setStatus("Cuenta eliminada correctamente.", "done");
+
+    await showConfirmDialog({
+      icon: "✅",
+      title: "Cuenta eliminada",
+      body: "Tu cuenta, saldo e historial de generaciones han sido eliminados correctamente.",
+      okLabel: "Entendido",
+    });
+
+    openAuthModal("login");
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "No se pudo eliminar la cuenta";
+    setAccountDeleteStatus(message, "failed");
+  } finally {
+    if (accountDeleteBtn) accountDeleteBtn.disabled = false;
+    if (accountDeleteTopBtn) accountDeleteTopBtn.disabled = false;
+  }
 }
 
 function requireLogin(actionText) {
@@ -1646,6 +1810,14 @@ accountModal?.addEventListener("click", (e) => {
   if (target instanceof HTMLElement && target.dataset.closeAccount === "true") {
     closeAccountModal();
   }
+});
+
+accountDeleteBtn?.addEventListener("click", () => {
+  deleteCurrentAccount();
+});
+
+accountDeleteTopBtn?.addEventListener("click", () => {
+  deleteCurrentAccount();
 });
 
 accountProfileForm?.addEventListener("submit", async (event) => {
