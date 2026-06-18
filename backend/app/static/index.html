@@ -4,6 +4,8 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>IA-IMP · Inicio</title>
+    <link rel="icon" type="image/png" href="/static/favicon.png?v=2" />
+    <link rel="shortcut icon" href="/static/favicon.png?v=2" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet" />
@@ -17,9 +19,7 @@
       </div>
       <nav class="topbar__nav" aria-label="Navegacion principal">
         <a href="#gallery">Galeria</a>
-        <a href="#modules">Modulos</a>
-        <a href="/studio">Abrir Studio</a>
-        <a href="/admin">Admin</a>
+        <a href="#prompts">Prompts</a>
       </nav>
       <a class="topbar__cta" href="/studio">Entrar ahora</a>
     </header>
@@ -28,7 +28,7 @@
       <section class="hero" aria-label="Presentacion principal">
         <div class="hero__media">
           <video class="hero__video" autoplay muted loop preload="metadata">
-            <source src="https://cdn.coverr.co/videos/coverr-modern-villa-1576/1080p.mp4" type="video/mp4" />
+            <source src="/contenido/IA-IMP-anim-5ad7836d.mp4" type="video/mp4" />
           </video>
           <div class="hero__overlay"></div>
         </div>
@@ -49,13 +49,13 @@
         <div class="hero__stack" aria-hidden="true">
           <article class="media-card media-card--video">
             <video autoplay muted loop preload="metadata">
-              <source src="https://cdn.coverr.co/videos/coverr-luxury-house-1579/1080p.mp4" type="video/mp4" />
+              <source src="/contenido/IA-IMP-anim-45826074.mp4" type="video/mp4" />
             </video>
             <span>Video arquitectonico</span>
           </article>
-          <article class="media-card"><img src="https://images.unsplash.com/photo-1600585154340-be6161a56a0c?auto=format&fit=crop&w=900&q=80" alt="Casa moderna" /></article>
-          <article class="media-card"><img src="https://images.unsplash.com/photo-1613977257593-487ecd136cc3?auto=format&fit=crop&w=900&q=80" alt="Interior arquitectonico" /></article>
-          <article class="media-card"><img src="https://images.unsplash.com/photo-1600607687939-ce8a6c25118c?auto=format&fit=crop&w=900&q=80" alt="Fachada premium" /></article>
+          <article class="media-card"><img src="/contenido/IA-IMP-110.png" alt="Casa moderna" /></article>
+          <article class="media-card"><img src="/contenido/IA-IMP-112.png" alt="Interior arquitectonico" /></article>
+          <article class="media-card"><img src="/contenido/IA-IMP-114.png" alt="Fachada premium" /></article>
         </div>
       </section>
 
@@ -65,16 +65,16 @@
           <h2>Imagenes y videos creados para inspirar desde el inicio.</h2>
         </div>
         <div class="gallery__rail" id="galleryRail">
-          <div class="gallery__card"><img src="https://images.unsplash.com/photo-1512917774080-9991f1c4c750?auto=format&fit=crop&w=900&q=80" alt="Renders de arquitectura" /></div>
-          <div class="gallery__card"><img src="https://images.unsplash.com/photo-1558618666-fcd25c85cd64?auto=format&fit=crop&w=900&q=80" alt="Casa de lujo" /></div>
-          <div class="gallery__card"><video autoplay muted loop preload="metadata"><source src="https://cdn.coverr.co/videos/coverr-contemporary-house-1577/1080p.mp4" type="video/mp4" /></video></div>
-          <div class="gallery__card"><img src="https://images.unsplash.com/photo-1600047509807-ba8f99d2cdde?auto=format&fit=crop&w=900&q=80" alt="Interior moderno" /></div>
-          <div class="gallery__card"><video autoplay muted loop preload="metadata"><source src="https://cdn.coverr.co/videos/coverr-modern-building-1566/1080p.mp4" type="video/mp4" /></video></div>
-          <div class="gallery__card"><img src="https://images.unsplash.com/photo-1605276374104-dee2a0ed3cd6?auto=format&fit=crop&w=900&q=80" alt="Fachada minimalista" /></div>
+          <div class="gallery__card"><img src="/contenido/IA-IMP-103.png" alt="Renders de arquitectura" /></div>
+          <div class="gallery__card"><img src="/contenido/IA-IMP-115.png" alt="Casa de lujo" /></div>
+          <div class="gallery__card"><video autoplay muted loop preload="metadata"><source src="/contenido/IA-IMP-anim-20401480.mp4" type="video/mp4" /></video></div>
+          <div class="gallery__card"><img src="/contenido/IA-IMP-126.png" alt="Interior moderno" /></div>
+          <div class="gallery__card"><video autoplay muted loop preload="metadata"><source src="/contenido/IA-IMP-influencer-cbdda7ce.mp4" type="video/mp4" /></video></div>
+          <div class="gallery__card"><img src="/contenido/IA-IMP-134.png" alt="Fachada minimalista" /></div>
         </div>
       </section>
 
-      <section id="modules" class="modules" aria-label="Modulos de la plataforma">
+      <section id="prompts" class="modules" aria-label="Prompts de la plataforma">
         <div class="section-head">
           <p>Lo que puede lograr el usuario</p>
           <h2>Prompts y resultados pensados para arquitectura realista.</h2>
@@ -113,7 +113,11 @@
     <script>
       const rail = document.getElementById("galleryRail");
       if (rail) {
-        rail.innerHTML += rail.innerHTML;
+        const extras = [
+          '<div class="gallery__card"><img src="/contenido/IA-IMP-124.png" alt="Interior moderno premium" /></div>',
+          '<div class="gallery__card"><video autoplay muted loop preload="metadata"><source src="/contenido/IA-IMP-influencer-ec42bbf5.mp4" type="video/mp4" /></video></div>'
+        ];
+        rail.insertAdjacentHTML("beforeend", extras.join(""));
       }
     </script>
   </body>

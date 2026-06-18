@@ -19,6 +19,8 @@ SESSION_COOKIE_NAME = "iaimp_session"
 USERNAME_RE = re.compile(r"^[a-zA-Z0-9._-]{3,32}$")
 PHONE_RE = re.compile(r"^\+?[0-9]{7,15}$")
 EMAIL_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
+ISOTIPO_PATH = PROJECT_ROOT / "Iconos" / "Isotipo IA-IMP.png"
 
 
 class InsufficientBalanceError(Exception):
@@ -260,6 +262,106 @@ def _full_name(first_name: str, last_name: str) -> str:
     return (f"{(first_name or '').strip()} {(last_name or '').strip()}").strip() or "usuario"
 
 
+def _escape_html(value: str) -> str:
+    return (
+        str(value or "")
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+    )
+
+
+def _build_email_template(
+    *,
+    title: str,
+    greeting: str,
+    message_lines: list[str],
+    highlights: dict[str, str] | None = None,
+    cta_label: str = "",
+    cta_url: str = "",
+    footer_note: str = "Este correo es informativo. Si necesitas ayuda, responde a este mensaje.",
+) -> dict[str, str]:
+    safe_title = _escape_html(title)
+    safe_greeting = _escape_html(greeting)
+    paragraphs_html = "".join(f"<p style='margin:0 0 12px 0;color:#1b1b1b;line-height:1.6;font-size:14px;'>{_escape_html(line)}</p>" for line in message_lines if line)
+
+    highlights_html = ""
+    if highlights:
+        rows = "".join(
+            (
+                "<tr>"
+                f"<td style='padding:10px 12px;border:1px solid #d9e6df;background:#f8fbf9;color:#0f3121;font-weight:700;font-size:13px;width:42%;'>{_escape_html(key)}</td>"
+                f"<td style='padding:10px 12px;border:1px solid #d9e6df;background:#ffffff;color:#1b1b1b;font-size:13px;'>{_escape_html(value)}</td>"
+                "</tr>"
+            )
+            for key, value in highlights.items()
+        )
+        highlights_html = (
+            "<table role='presentation' cellspacing='0' cellpadding='0' style='width:100%;border-collapse:collapse;margin:8px 0 18px 0;'>"
+            f"{rows}"
+            "</table>"
+        )
+
+    cta_block_html = ""
+    if cta_label and cta_url:
+        cta_block_html = (
+            "<div style='margin:20px 0 4px 0;'>"
+            f"<a href='{_escape_html(cta_url)}' style='display:inline-block;padding:12px 18px;background:#0c7a42;color:#ffffff;text-decoration:none;border-radius:10px;font-weight:700;font-size:14px;'>"
+            f"{_escape_html(cta_label)}"
+            "</a>"
+            "</div>"
+        )
+
+    html = (
+        "<!doctype html>"
+        "<html><body style='margin:0;padding:0;background:#0b0b0b;font-family:Arial,Helvetica,sans-serif;'>"
+        "<table role='presentation' cellspacing='0' cellpadding='0' style='width:100%;padding:20px 10px;background:#0b0b0b;'>"
+        "<tr><td align='center'>"
+        "<table role='presentation' cellspacing='0' cellpadding='0' style='width:100%;max-width:640px;border-collapse:collapse;'>"
+        "<tr><td style='background:#0f0f0f;border:1px solid #19392b;border-radius:14px 14px 0 0;padding:16px 20px;'>"
+        "<table role='presentation' cellspacing='0' cellpadding='0' style='width:100%;'>"
+        "<tr>"
+        "<td style='vertical-align:middle;'>"
+        "<img src='cid:iaimp-isotipo' alt='IA-IMP' style='width:44px;height:44px;border-radius:10px;border:1px solid #1e7b49;background:#0a2d1c;display:block;' />"
+        "</td>"
+        "<td style='vertical-align:middle;padding-left:12px;'>"
+        "<p style='margin:0;color:#9de2be;font-size:11px;letter-spacing:0.14em;font-weight:700;text-transform:uppercase;'>IA-IMP</p>"
+        f"<h1 style='margin:3px 0 0 0;color:#ffffff;font-size:18px;line-height:1.3;'>{safe_title}</h1>"
+        "</td>"
+        "</tr>"
+        "</table>"
+        "</td></tr>"
+        "<tr><td style='background:#ffffff;border-left:1px solid #19392b;border-right:1px solid #19392b;padding:20px;'>"
+        f"<p style='margin:0 0 12px 0;color:#0e5130;font-weight:700;font-size:14px;'>{safe_greeting}</p>"
+        f"{paragraphs_html}"
+        f"{highlights_html}"
+        f"{cta_block_html}"
+        "</td></tr>"
+        "<tr><td style='background:#f2f6f4;border:1px solid #19392b;border-top:none;border-radius:0 0 14px 14px;padding:12px 20px;'>"
+        f"<p style='margin:0;color:#466457;font-size:12px;line-height:1.5;'>{_escape_html(footer_note)}</p>"
+        "</td></tr>"
+        "</table>"
+        "</td></tr></table>"
+        "</body></html>"
+    )
+
+    highlights_text = ""
+    if highlights:
+        highlights_text = "\n" + "\n".join(f"- {k}: {v}" for k, v in highlights.items()) + "\n"
+
+    plain = (
+        f"{title}\n\n"
+        f"{greeting}\n\n"
+        + "\n".join(line for line in message_lines if line)
+        + highlights_text
+        + (f"\n{cta_label}: {cta_url}\n" if cta_label and cta_url else "\n")
+        + f"\n{footer_note}\n"
+    )
+
+    return {"html": html, "text": plain}
+
+
 def send_registration_success_notification(user: dict) -> dict:
     user_id = int(user.get("user_id") or 0)
     if user_id <= 0:
@@ -273,23 +375,40 @@ def send_registration_success_notification(user: dict) -> dict:
         return {"delivered": False, "mode": "skipped", "reason": "email_vacio"}
 
     name = _full_name(str(user.get("first_name") or ""), str(user.get("last_name") or ""))
-    body = (
-        f"Hola {name},\n\n"
-        "Tu registro en IA-IMP fue exitoso.\n"
-        "Ya puedes iniciar sesion, recargar saldo y usar los modulos de generacion.\n\n"
-        "Gracias por confiar en IA-IMP."
+    mail = _build_email_template(
+        title="Registro exitoso en IA-IMP",
+        greeting=f"Hola {name},",
+        message_lines=[
+            "Tu cuenta fue creada correctamente y ya puedes comenzar a trabajar en la plataforma.",
+            "Ahora puedes iniciar sesion, recargar saldo y usar los modulos de generacion visual.",
+        ],
+        highlights={
+            "Correo registrado": email,
+            "Fecha (UTC)": datetime.now(timezone.utc).isoformat(),
+        },
+        cta_label="Entrar a IA-IMP",
+        cta_url="https://iaimp.impormaderasltda.com/studio",
+        footer_note="Bienvenido a IA-IMP. Este correo confirma el alta de tu cuenta.",
     )
-    return send_email_notification(email, "Registro exitoso en IA-IMP", body)
+    return send_email_notification(email, "Registro exitoso en IA-IMP", mail["text"], html_body=mail["html"])
 
 
 def send_password_reset_success_notification(email: str) -> dict:
     safe_email = _normalize_email(email)
-    body = (
-        "Tu contraseña en IA-IMP fue actualizada correctamente.\n\n"
-        "Si no realizaste este cambio, te recomendamos cambiar tu contraseña de inmediato "
-        "y contactar al soporte."
+    mail = _build_email_template(
+        title="Contraseña actualizada en IA-IMP",
+        greeting="Hola,",
+        message_lines=[
+            "Tu contraseña fue actualizada correctamente.",
+            "Si no reconoces este cambio, restablece tu clave de inmediato y contacta soporte.",
+        ],
+        highlights={
+            "Cuenta": safe_email,
+            "Fecha (UTC)": datetime.now(timezone.utc).isoformat(),
+        },
+        footer_note="Este correo es de seguridad para proteger tu cuenta.",
     )
-    return send_email_notification(safe_email, "Contraseña actualizada en IA-IMP", body)
+    return send_email_notification(safe_email, "Contraseña actualizada en IA-IMP", mail["text"], html_body=mail["html"])
 
 
 def send_payment_success_notification(
@@ -311,17 +430,25 @@ def send_payment_success_notification(
 
     name = _full_name(str(contact.get("first_name") or ""), str(contact.get("last_name") or ""))
     safe_tx_id = (transaction_id or "").strip() or "N/A"
-    body = (
-        f"Hola {name},\n\n"
-        "Pago exitoso en IA-IMP.\n\n"
-        "Recibo:\n"
-        f"- Referencia: {safe_reference}\n"
-        f"- Transaccion: {safe_tx_id}\n"
-        f"- Monto acreditado: ${_format_cop(amount_cop)} COP\n"
-        f"- Saldo actual: ${_format_cop(balance_cop)} COP\n"
-        f"- Fecha (UTC): {datetime.now(timezone.utc).isoformat()}\n"
+    mail = _build_email_template(
+        title="Pago exitoso IA-IMP",
+        greeting=f"Hola {name},",
+        message_lines=[
+            "Tu pago fue aprobado y el saldo ya fue acreditado en tu cuenta.",
+            "A continuacion te compartimos el recibo de la operacion.",
+        ],
+        highlights={
+            "Referencia": safe_reference,
+            "Transaccion": safe_tx_id,
+            "Monto acreditado": f"${_format_cop(amount_cop)} COP",
+            "Saldo actual": f"${_format_cop(balance_cop)} COP",
+            "Fecha (UTC)": datetime.now(timezone.utc).isoformat(),
+        },
+        cta_label="Entrar a mi cuenta",
+        cta_url="https://iaimp.impormaderasltda.com/studio",
+        footer_note="Conserva este correo como comprobante de tu recarga.",
     )
-    return send_email_notification(str(contact["email"]), "Pago exitoso IA-IMP (recibo)", body)
+    return send_email_notification(str(contact["email"]), "Pago exitoso IA-IMP (recibo)", mail["text"], html_body=mail["html"])
 
 
 def send_payment_failed_notification(
@@ -344,18 +471,25 @@ def send_payment_failed_notification(
 
     name = _full_name(str(contact.get("first_name") or ""), str(contact.get("last_name") or ""))
     safe_tx_id = (transaction_id or "").strip() or "N/A"
-    body = (
-        f"Hola {name},\n\n"
-        "Tu intento de pago en IA-IMP no fue aprobado.\n\n"
-        "Detalle:\n"
-        f"- Referencia: {safe_reference}\n"
-        f"- Estado: {safe_status}\n"
-        f"- Transaccion: {safe_tx_id}\n"
-        f"- Monto solicitado: ${_format_cop(amount_cop)} COP\n"
-        f"- Fecha (UTC): {datetime.now(timezone.utc).isoformat()}\n\n"
-        "Puedes intentarlo nuevamente desde el modulo de recargas."
+    mail = _build_email_template(
+        title="Pago no aprobado en IA-IMP",
+        greeting=f"Hola {name},",
+        message_lines=[
+            "Tu intento de pago no fue aprobado por la pasarela.",
+            "Puedes intentar nuevamente desde el modulo de recargas.",
+        ],
+        highlights={
+            "Referencia": safe_reference,
+            "Estado": safe_status,
+            "Transaccion": safe_tx_id,
+            "Monto solicitado": f"${_format_cop(amount_cop)} COP",
+            "Fecha (UTC)": datetime.now(timezone.utc).isoformat(),
+        },
+        cta_label="Reintentar recarga",
+        cta_url="https://iaimp.impormaderasltda.com/studio",
+        footer_note="Si el problema persiste, valida tu metodo de pago o contacta soporte.",
     )
-    return send_email_notification(str(contact["email"]), "Pago no aprobado en IA-IMP", body)
+    return send_email_notification(str(contact["email"]), "Pago no aprobado en IA-IMP", mail["text"], html_body=mail["html"])
 
 
 def send_low_balance_notification(
@@ -371,14 +505,23 @@ def send_low_balance_notification(
         return {"delivered": False, "mode": "skipped", "reason": "above_threshold"}
 
     name = _full_name(first_name, last_name)
-    body = (
-        f"Hola {name},\n\n"
-        "Tu saldo en IA-IMP esta por agotarse.\n"
-        f"- Saldo actual: ${_format_cop(balance_cop)} COP\n"
-        f"- Umbral de alerta: ${_format_cop(threshold_cop)} COP\n\n"
-        "Te recomendamos recargar para evitar interrupciones en tus renders."
+    mail = _build_email_template(
+        title="Alerta de saldo bajo IA-IMP",
+        greeting=f"Hola {name},",
+        message_lines=[
+            "Tu saldo esta por agotarse y puede afectar tus proximas generaciones.",
+            "Te recomendamos recargar para evitar interrupciones en el servicio.",
+        ],
+        highlights={
+            "Saldo actual": f"${_format_cop(balance_cop)} COP",
+            "Umbral de alerta": f"${_format_cop(threshold_cop)} COP",
+            "Fecha (UTC)": datetime.now(timezone.utc).isoformat(),
+        },
+        cta_label="Recargar saldo",
+        cta_url="https://iaimp.impormaderasltda.com/studio",
+        footer_note="Notificacion automatica de saldo para continuidad operativa.",
     )
-    return send_email_notification(email, "Alerta de saldo bajo IA-IMP", body)
+    return send_email_notification(email, "Alerta de saldo bajo IA-IMP", mail["text"], html_body=mail["html"])
 
 
 def authenticate_user(login: str, password: str) -> dict | None:
@@ -791,7 +934,7 @@ def reset_password_from_token(token: str, new_password: str) -> dict:
     return {"ok": True, "email": str(row["email"])}
 
 
-def send_email_notification(to_email: str, subject: str, body: str) -> dict:
+def send_email_notification(to_email: str, subject: str, body: str, html_body: str | None = None) -> dict:
     safe_to = _normalize_email(to_email)
     host = (os.getenv("SMTP_HOST") or getattr(settings, "smtp_host", "") or "").strip()
     port = int(os.getenv("SMTP_PORT") or getattr(settings, "smtp_port", 587) or 587)
@@ -805,6 +948,23 @@ def send_email_notification(to_email: str, subject: str, body: str) -> dict:
     message["To"] = safe_to
     message["Subject"] = subject
     message.set_content(body)
+
+    if html_body:
+        message.add_alternative(html_body, subtype="html")
+        if ISOTIPO_PATH.exists():
+            try:
+                logo_bytes = ISOTIPO_PATH.read_bytes()
+                html_part = message.get_payload()[-1]
+                html_part.add_related(
+                    logo_bytes,
+                    maintype="image",
+                    subtype="png",
+                    cid="<iaimp-isotipo>",
+                    filename="isotipo-iaimp.png",
+                    disposition="inline",
+                )
+            except Exception:
+                pass
 
     outbox_dir = Path(settings.data_dir) / "email_outbox"
     outbox_dir.mkdir(parents=True, exist_ok=True)
@@ -831,12 +991,23 @@ def send_email_notification(to_email: str, subject: str, body: str) -> dict:
 def create_password_reset_notification(email: str, user_id: int, base_url: str) -> dict:
     token = create_password_reset_token(user_id, email)
     reset_url = f"{base_url.rstrip('/')}/studio?reset_token={token}"
-    body = (
-        "Hemos recibido una solicitud para restablecer tu contraseña en IA-IMP.\n\n"
-        f"Usa este enlace para continuar: {reset_url}\n\n"
-        "Si no solicitaste este cambio, ignora este mensaje."
+    mail = _build_email_template(
+        title="Recuperacion de contraseña IA-IMP",
+        greeting="Hola,",
+        message_lines=[
+            "Recibimos una solicitud para restablecer tu contraseña.",
+            "Usa el boton de abajo para continuar con el proceso de recuperacion.",
+            "Si no solicitaste este cambio, ignora este mensaje.",
+        ],
+        highlights={
+            "Correo": _normalize_email(email),
+            "Vigencia del enlace": "60 minutos",
+        },
+        cta_label="Restablecer contraseña",
+        cta_url=reset_url,
+        footer_note="Por seguridad, este enlace caduca automaticamente.",
     )
-    delivery = send_email_notification(email, "Recuperacion de contraseña IA-IMP", body)
+    delivery = send_email_notification(email, "Recuperacion de contraseña IA-IMP", mail["text"], html_body=mail["html"])
     mark_password_reset_sent(token)
     return {"token": token, "reset_url": reset_url, "delivery": delivery}
 
