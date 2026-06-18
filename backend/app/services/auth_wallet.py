@@ -13,6 +13,7 @@ from pathlib import Path
 from fastapi import Cookie, HTTPException
 
 from ..config import settings
+from .security import ensure_strong_password
 
 DB_PATH = Path(settings.data_dir) / "accounts.db"
 SESSION_COOKIE_NAME = "iaimp_session"
@@ -191,8 +192,7 @@ def register_user(first_name: str, last_name: str, email: str, password: str, ph
 
     safe_email = _normalize_email(email)
     uname = _normalize_username(f"user_{secrets.token_hex(4)}")
-    if len((password or "").strip()) < 6:
-        raise ValueError("La contraseña debe tener al menos 6 caracteres")
+    ensure_strong_password(password)
 
     salt = secrets.token_hex(16)
     pwd_hash = _hash_password(password, salt)
@@ -802,8 +802,7 @@ def set_user_balance(user_id: int, new_balance_cop: int, module: str = "admin_ad
 
 
 def change_password(user_id: int, current_password: str, new_password: str) -> None:
-    if len((new_password or "").strip()) < 6:
-        raise ValueError("La nueva contraseña debe tener al menos 6 caracteres")
+    ensure_strong_password(new_password)
 
     with _get_conn() as conn:
         row = conn.execute("SELECT password_hash, salt FROM users WHERE id = ?", (int(user_id),)).fetchone()
@@ -938,8 +937,7 @@ def mark_password_reset_sent(token: str) -> None:
 
 def reset_password_from_token(token: str, new_password: str) -> dict:
     safe_token = (token or "").strip()
-    if len((new_password or "").strip()) < 6:
-        raise ValueError("La nueva contraseña debe tener al menos 6 caracteres")
+    ensure_strong_password(new_password)
 
     with _get_conn() as conn:
         row = conn.execute(

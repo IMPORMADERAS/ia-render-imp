@@ -2,6 +2,8 @@ from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
+from ..config import settings
+from ..services.rate_limit import client_ip_from_request, enforce_rate_limit, reset_rate_limit
 from ..services.auth_wallet import (
     SESSION_COOKIE_NAME,
     AuthenticatedUser,
@@ -77,6 +79,22 @@ def _session_cookie_max_age(days: int = 30) -> int:
     return max(1, days) * 24 * 60 * 60
 
 
+def _set_auth_cookie(response: Response, token: str, days: int = 30) -> None:
+    response.set_cookie(
+        key=SESSION_COOKIE_NAME,
+        value=token,
+        httponly=True,
+        samesite="lax",
+        secure=settings.secure_cookies,
+        max_age=_session_cookie_max_age(days),
+        path="/",
+    )
+
+
+def _delete_auth_cookie(response: Response) -> None:
+    response.delete_cookie(SESSION_COOKIE_NAME, path="/", secure=settings.secure_cookies, httponly=True, samesite="lax")
+
+
 @router.post("/register", response_model=dict)
 def register(payload: RegisterRequest, response: Response):
     if payload.password != payload.password_confirm:
@@ -88,14 +106,7 @@ def register(payload: RegisterRequest, response: Response):
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     token = create_session(int(created["user_id"]), days=30)
-    response.set_cookie(
-        key=SESSION_COOKIE_NAME,
-        value=token,
-        httponly=True,
-        samesite="lax",
-        secure=False,
-        max_age=_session_cookie_max_age(30),
-    )
+    _set_auth_cookie(response, token, days=30)
     try:
         send_registration_success_notification(created)
     except Exception:
@@ -107,20 +118,18 @@ def register(payload: RegisterRequest, response: Response):
 
 
 @router.post("/login", response_model=dict)
-def login(payload: LoginRequest, response: Response):
+def login(payload: LoginRequest, response: Response, request: Request):
+    safe_login = (payload.login or "").strip().lower()
+    rate_key = f"{client_ip_from_request(request)}:{safe_login}"
+    enforce_rate_limit("auth-login", rate_key, max_attempts=6, window_seconds=300, block_seconds=900)
+
     user = authenticate_user(payload.login, payload.password)
     if user is None:
         raise HTTPException(status_code=401, detail="Email o contraseña incorrectos")
 
     token = create_session(int(user["user_id"]), days=30)
-    response.set_cookie(
-        key=SESSION_COOKIE_NAME,
-        value=token,
-        httponly=True,
-        samesite="lax",
-        secure=False,
-        max_age=_session_cookie_max_age(30),
-    )
+    reset_rate_limit("auth-login", rate_key)
+    _set_auth_cookie(response, token, days=30)
     return {
         "authenticated": True,
         "user": user,
@@ -129,6 +138,10 @@ def login(payload: LoginRequest, response: Response):
 
 @router.post("/recover-password", response_model=dict)
 def recover_password(payload: RecoverPasswordRequest, request: Request):
+    safe_email = (payload.email or "").strip().lower()
+    rate_key = f"{client_ip_from_request(request)}:{safe_email}"
+    enforce_rate_limit("auth-recover", rate_key, max_attempts=4, window_seconds=600, block_seconds=1800)
+
     try:
         user = get_user_by_email(payload.email)
     except ValueError as exc:
@@ -176,7 +189,7 @@ def logout(
     del user
     # Remove persisted session token and clear browser cookie.
     delete_session(session_token or "")
-    response.delete_cookie(SESSION_COOKIE_NAME)
+    _delete_auth_cookie(response)
     return {"ok": True}
 
 
@@ -289,7 +302,7 @@ def delete_account(
     account_summary = delete_user_account(user.user_id)
 
     delete_session(session_token or "")
-    response.delete_cookie(SESSION_COOKIE_NAME)
+    _delete_auth_cookie(response)
 
     return {
         "ok": True,

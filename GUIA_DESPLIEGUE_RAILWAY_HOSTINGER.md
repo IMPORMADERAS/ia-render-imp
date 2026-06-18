@@ -54,6 +54,8 @@ En la configuracion del servicio:
 En Variables, agrega al menos:
 
     APP_ENV=production
+    ADMIN_USERNAME=tu_admin_seguro
+    ADMIN_PASSWORD=tu_password_admin_seguro
     RENDER_PROVIDER=replicate
     REPLICATE_API_TOKEN=TU_TOKEN_REPLICATE
     REPLICATE_MODEL=black-forest-labs/flux-kontext-pro
@@ -82,6 +84,7 @@ Notas importantes:
 - En Railway no hay GPU por defecto, por eso USE_GPU=false.
 - Si usas RENDER_PROVIDER=local en Railway, el rendimiento sera limitado.
 - Para produccion, recomienda RENDER_PROVIDER=replicate.
+- En produccion no dejes credenciales admin por defecto. La app ahora exige `ADMIN_USERNAME` y `ADMIN_PASSWORD` configurados y cookies seguras sobre HTTPS.
 
 ### 2.4 Volumen persistente (recomendado)
 El proyecto guarda datos en backend/data. En Railway el filesystem del contenedor es efimero.

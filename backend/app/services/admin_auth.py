@@ -10,6 +10,7 @@ from pathlib import Path
 from fastapi import Cookie, HTTPException
 
 from ..config import settings
+from .security import ensure_strong_password, insecure_admin_credentials
 
 DB_PATH = Path(settings.data_dir) / "accounts.db"
 ADMIN_SESSION_COOKIE_NAME = "iaimp_admin_session"
@@ -68,10 +69,19 @@ def init_admin_auth_db() -> None:
             """
         )
 
-        username = _normalize_username(settings.admin_username)
+        raw_username = (settings.admin_username or "").strip()
         password = (settings.admin_password or "").strip()
-        if not username or not password:
+        if settings.is_production:
+            if not raw_username or not password:
+                raise RuntimeError("Debes configurar ADMIN_USERNAME y ADMIN_PASSWORD en produccion")
+            if insecure_admin_credentials(raw_username, password):
+                raise RuntimeError("No puedes usar credenciales admin por defecto en produccion")
+
+        if not raw_username or not password:
             return
+
+        username = _normalize_username(raw_username)
+        ensure_strong_password(password)
 
         salt = secrets.token_hex(16)
         password_hash = _hash_password(password, salt)

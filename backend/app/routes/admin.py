@@ -3,6 +3,8 @@ from collections import Counter
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
 
+from ..config import settings
+from ..services.rate_limit import client_ip_from_request, enforce_rate_limit, reset_rate_limit
 from ..services.admin_auth import (
     ADMIN_SESSION_COOKIE_NAME,
     AdminUser,
@@ -36,6 +38,22 @@ def _session_cookie_max_age(days: int = 30) -> int:
     return max(1, days) * 24 * 60 * 60
 
 
+def _set_admin_cookie(response: Response, token: str, days: int = 30) -> None:
+    response.set_cookie(
+        key=ADMIN_SESSION_COOKIE_NAME,
+        value=token,
+        httponly=True,
+        samesite="lax",
+        secure=settings.secure_cookies,
+        max_age=_session_cookie_max_age(days),
+        path="/",
+    )
+
+
+def _delete_admin_cookie(response: Response) -> None:
+    response.delete_cookie(ADMIN_SESSION_COOKIE_NAME, path="/", secure=settings.secure_cookies, httponly=True, samesite="lax")
+
+
 def _summarize_generations(items: list[dict]) -> dict[str, int]:
     summary: Counter[str] = Counter()
     for item in items:
@@ -58,20 +76,18 @@ def _build_user_snapshot(user: dict, detail_limit: int = 500) -> dict:
 
 
 @router.post("/login", response_model=dict)
-def login(payload: AdminLoginRequest, response: Response):
+def login(payload: AdminLoginRequest, response: Response, request: Request):
+    safe_login = (payload.login or "").strip().lower()
+    rate_key = f"{client_ip_from_request(request)}:{safe_login}"
+    enforce_rate_limit("admin-login", rate_key, max_attempts=5, window_seconds=600, block_seconds=1800)
+
     admin = authenticate_admin(payload.login, payload.password)
     if admin is None:
         raise HTTPException(status_code=401, detail="Usuario o contraseña de administrador incorrectos")
 
     token = create_admin_session(int(admin["admin_id"]), days=30)
-    response.set_cookie(
-        key=ADMIN_SESSION_COOKIE_NAME,
-        value=token,
-        httponly=True,
-        samesite="lax",
-        secure=False,
-        max_age=_session_cookie_max_age(30),
-    )
+    reset_rate_limit("admin-login", rate_key)
+    _set_admin_cookie(response, token, days=30)
     return {"authenticated": True, "admin": admin}
 
 
@@ -83,7 +99,7 @@ def logout(
 ):
     del admin
     delete_admin_session(session_token or "")
-    response.delete_cookie(ADMIN_SESSION_COOKIE_NAME)
+    _delete_admin_cookie(response)
     return {"ok": True}
 
 

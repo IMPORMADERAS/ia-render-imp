@@ -30,8 +30,8 @@ class Settings(BaseSettings):
     wompi_api_base_url: str = "https://api.wompi.co/v1"
     wompi_currency: str = "COP"
     wompi_min_recharge_cop: int = 5000
-    admin_username: str = "admin"
-    admin_password: str = "Admin1234!"
+    admin_username: str = ""
+    admin_password: str = ""
     smtp_host: str = ""
     smtp_port: int = 587
     smtp_username: str = ""
@@ -50,6 +50,14 @@ class Settings(BaseSettings):
     default_guidance: float = 7.5
 
     model_config = SettingsConfigDict(env_file="backend/.env", env_file_encoding="utf-8", extra="ignore")
+
+    @property
+    def is_production(self) -> bool:
+        return (self.app_env or "").strip().lower() in {"prod", "production"}
+
+    @property
+    def secure_cookies(self) -> bool:
+        return self.is_production
 
 
 settings = Settings()
