@@ -57,6 +57,21 @@ def studio() -> FileResponse:
     return FileResponse(path=static_dir / "studio.html")
 
 
+@app.get("/documentacion", include_in_schema=False)
+def documentation_page() -> FileResponse:
+    return FileResponse(path=static_dir / "documentation.html")
+
+
+@app.get("/terminos-y-condiciones", include_in_schema=False)
+def terms_page() -> FileResponse:
+    return FileResponse(path=static_dir / "terms.html")
+
+
+@app.get("/politica-de-privacidad", include_in_schema=False)
+def privacy_page() -> FileResponse:
+    return FileResponse(path=static_dir / "privacy.html")
+
+
 @app.get("/studio-imp", include_in_schema=False)
 def studio_imp(_user=Depends(require_authenticated_user)) -> FileResponse:
     if not studio_imp_dir.exists():

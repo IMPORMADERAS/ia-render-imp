@@ -131,12 +131,37 @@ body {
   padding: 0.85rem 1rem;
 }
 
+.studio-footer__content {
+  display: grid;
+  gap: 0.55rem;
+}
+
 .studio-footer p {
   margin: 0;
   color: #d9d9d9;
   font-size: 0.8rem;
   line-height: 1.42;
   text-align: center;
+}
+
+.studio-footer__links {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.studio-footer__links a {
+  color: #87f7b7;
+  text-decoration: none;
+  font-size: 0.79rem;
+  letter-spacing: 0.02em;
+}
+
+.studio-footer__links a:hover,
+.studio-footer__links a:focus-visible {
+  text-decoration: underline;
 }
 
 .hero-stage__tile {
@@ -1675,6 +1700,14 @@ h2 {
 
   .brand-head {
     gap: 0.65rem;
+  }
+
+  .studio-footer__links {
+    gap: 0.7rem;
+  }
+
+  .studio-footer__links a {
+    font-size: 0.75rem;
   }
 
   .brand-copy h1,

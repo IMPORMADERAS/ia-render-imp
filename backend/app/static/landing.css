@@ -327,6 +327,11 @@ video {
   padding: 0.95rem 1.1rem;
 }
 
+.site-footer__content {
+  display: grid;
+  gap: 0.55rem;
+}
+
 .site-footer p {
   margin: 0;
   color: #d8d8d8;
@@ -334,6 +339,26 @@ video {
   line-height: 1.45;
   letter-spacing: 0.01em;
   text-align: center;
+}
+
+.site-footer__links {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.site-footer__links a {
+  color: #d4ff1f;
+  text-decoration: none;
+  font-size: 0.82rem;
+  letter-spacing: 0.02em;
+}
+
+.site-footer__links a:hover,
+.site-footer__links a:focus-visible {
+  text-decoration: underline;
 }
 
 @media (max-width: 1100px) {
@@ -392,5 +417,13 @@ video {
   .site-footer p {
     font-size: 0.75rem;
     line-height: 1.4;
+  }
+
+  .site-footer__links {
+    gap: 0.7rem;
+  }
+
+  .site-footer__links a {
+    font-size: 0.76rem;
   }
 }
