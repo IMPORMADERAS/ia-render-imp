@@ -131,86 +131,41 @@ class ArchitecturalRenderer:
         }
         return min(candidates.keys(), key=lambda key: abs(candidates[key] - ratio))
 
-    def _aspect_delta(self, reference_image_path: str, generated_image_path: str) -> float:
-        ref_w, ref_h = self._get_image_size_with_exif(reference_image_path)
-        gen_w, gen_h = self._get_image_size_with_exif(generated_image_path)
-        if ref_w <= 0 or ref_h <= 0 or gen_w <= 0 or gen_h <= 0:
-            return 0.0
-        return abs((gen_w / gen_h) - (ref_w / ref_h))
-
-    def _try_reference_guided_reframe(self, reference_image_path: str, generated_image_path: str) -> bool:
-        if not settings.replicate_api_token:
-            return False
-
-        try:
-            import replicate
-        except Exception:
-            return False
-
-        os.environ["REPLICATE_API_TOKEN"] = settings.replicate_api_token
-
-        ref_w, ref_h = self._get_image_size_with_exif(reference_image_path)
-        if ref_w <= 0 or ref_h <= 0:
-            return False
-        aspect_ratio = self._closest_aspect_ratio_token(ref_w, ref_h)
-        output_format = Path(generated_image_path).suffix.lower().replace(".", "") or "png"
-        if output_format not in {"png", "jpg", "jpeg", "webp"}:
-            output_format = "png"
-
-        prompt = (
-            "Use reference image 1 as strict composition and framing guide. "
-            "Keep the same camera position, zoom, geometry, and all visible objects from reference image 1. "
-            "Apply only the material/style look from reference image 2. "
-            "Do not crop, do not zoom, and do not remove scene elements from reference image 1."
+    def _realism_suffix(self, quality: str) -> str:
+        base = (
+            "Transform into a photorealistic architectural photograph. "
+            "Use physically plausible materials, realistic global illumination, "
+            "natural shadows, balanced exposure, real-world reflections, "
+            "and subtle camera optics with clean dynamic range. "
+            "Remove CAD/viewport look, remove flat color blocks, remove line-art appearance, "
+            "and avoid stylized or illustrative rendering."
         )
-
-        attempts = [
-            {
-                "prompt": prompt,
-                "image_input": [Path(reference_image_path), Path(generated_image_path)],
-                "aspect_ratio": aspect_ratio,
-                "output_format": output_format,
-                "prompt_upsampling": True,
-                "safety_tolerance": 2,
-            },
-            {
-                "prompt": prompt,
-                "input_image": [Path(reference_image_path), Path(generated_image_path)],
-                "aspect_ratio": aspect_ratio,
-                "output_format": output_format,
-                "prompt_upsampling": True,
-                "safety_tolerance": 2,
-            },
-        ]
-
-        for payload in attempts:
-            try:
-                output = self._run_replicate(replicate, "google/nano-banana", payload)
-                first_output = output[0] if isinstance(output, list) else output
-                self._save_remote_output(first_output, generated_image_path)
-                return True
-            except Exception:
-                continue
-
-        return False
+        if quality == "ultra":
+            return (
+                f"{base} "
+                "Prioritize high fidelity micro-details in textures, joints, edges, "
+                "surface roughness variation, and true-to-life material depth."
+            )
+        if quality == "fast":
+            return (
+                f"{base} "
+                "Keep the transformation realistic while preserving speed and stable geometry."
+            )
+        return (
+            f"{base} "
+            "Keep strong realism in materials and lighting while preserving architecture and framing."
+        )
 
     def _enforce_reference_aspect_ratio(self, reference_image_path: str, generated_image_path: str) -> None:
         """Guarantee generated image keeps the same aspect ratio as reference image.
 
-        If the provider returns a different ratio, keep full generated content
-        without deformation by placing it over a blurred background fitted to
-        the reference dimensions.
+        IMPORTANT: this step is local-only (Pillow) to avoid triggering a second
+        cloud generation/cost in Replicate for the same user request.
         """
         reference_path = Path(reference_image_path)
         generated_path = Path(generated_image_path)
         if not reference_path.exists() or not generated_path.exists():
             return
-
-        # First try to recover framing with a second guided pass instead of padding/cropping.
-        if self._aspect_delta(reference_image_path, generated_image_path) > 0.02:
-            reframed = self._try_reference_guided_reframe(reference_image_path, generated_image_path)
-            if reframed and self._aspect_delta(reference_image_path, generated_image_path) <= 0.01:
-                return
 
         with Image.open(reference_path) as ref_raw, Image.open(generated_path) as gen_raw:
             # Respect camera/phone EXIF orientation before comparing ratios.
@@ -229,16 +184,8 @@ class ArchitecturalRenderer:
             if abs(current_ratio - target_ratio) <= 0.005:
                 return
 
-            target_size = (ref_w, ref_h)
-            background = ImageOps.fit(gen_img, target_size, method=Image.Resampling.LANCZOS)
-            background = background.filter(ImageFilter.GaussianBlur(radius=18))
-
-            foreground = ImageOps.contain(gen_img, target_size, method=Image.Resampling.LANCZOS)
-            offset_x = (ref_w - foreground.width) // 2
-            offset_y = (ref_h - foreground.height) // 2
-
-            corrected = background
-            corrected.paste(foreground, (offset_x, offset_y))
+            # Keep reference format (horizontal/vertical/square) without blurred side bars.
+            corrected = ImageOps.fit(gen_img, (ref_w, ref_h), method=Image.Resampling.LANCZOS)
             corrected.save(generated_path)
 
     def _normalize_to_full_hd(self, reference_image_path: str, generated_image_path: str) -> None:
@@ -292,6 +239,9 @@ class ArchitecturalRenderer:
 
         import replicate
 
+        ref_w, ref_h = self._get_image_size_with_exif(input_image_path)
+        aspect_ratio_token = self._closest_aspect_ratio_token(ref_w, ref_h)
+
         with open(input_image_path, "rb") as image_file:
             if quality == "fast":
                 run_steps = min(steps, 24)
@@ -302,11 +252,12 @@ class ArchitecturalRenderer:
 
             model_id = settings.replicate_model.strip().lower()
             configured_field = settings.replicate_input_image_field.strip() or "input_image"
+            boosted_prompt = f"{prompt} {self._realism_suffix(quality)}"
 
             if "flux-kontext" in model_id:
                 kontext_common = {
-                    "prompt": prompt,
-                    "aspect_ratio": "match_input_image",
+                    "prompt": boosted_prompt,
+                    "aspect_ratio": aspect_ratio_token,
                     "output_format": "png",
                     "prompt_upsampling": True,
                     "safety_tolerance": 2,
@@ -317,11 +268,11 @@ class ArchitecturalRenderer:
                 attempts = [
                     {**kontext_common, configured_field: image_file},
                     {**kontext_common, "input_image": image_file},
-                    {"prompt": prompt, "input_image": image_file},
+                    {"prompt": boosted_prompt, "input_image": image_file},
                 ]
             else:
                 common = {
-                    "prompt": prompt,
+                    "prompt": boosted_prompt,
                     "negative_prompt": negative_prompt,
                     "num_inference_steps": run_steps,
                     "guidance_scale": guidance_scale,
@@ -331,11 +282,11 @@ class ArchitecturalRenderer:
 
                 attempts = [
                     {**common, configured_field: image_file},
-                    {"prompt": prompt, "negative_prompt": negative_prompt, configured_field: image_file},
+                    {"prompt": boosted_prompt, "negative_prompt": negative_prompt, configured_field: image_file},
                     {**common, "input_image": image_file},
                     {**common, "image": image_file},
-                    {"prompt": prompt, "input_image": image_file},
-                    {"prompt": prompt, "image": image_file},
+                    {"prompt": boosted_prompt, "input_image": image_file},
+                    {"prompt": boosted_prompt, "image": image_file},
                 ]
 
             last_error: Exception | None = None
@@ -539,13 +490,14 @@ class ArchitecturalRenderer:
         reference_guide = " ".join(reference_guide_parts)
 
         base_prompt = prompt.strip()
+        realism_suffix = self._realism_suffix(quality)
         if mode == "mix":
             prompt_text = (
                 "Edit the architectural capture using the selected material references. "
                 "Keep the geometry, perspective, camera framing, and scale unchanged. "
                 "Apply a natural material blend with photorealistic lighting and texture scale. "
                 f"{reference_guide} "
-                f"User direction: {base_prompt}"
+                f"User direction: {base_prompt}. {realism_suffix}"
             )
         else:
             plan_text = material_plan.strip() or "Apply each selected material to the most suitable zones while preserving all other areas."
@@ -554,7 +506,7 @@ class ArchitecturalRenderer:
                 "Keep geometry, perspective, and composition unchanged. "
                 "Preserve realism and material scale. "
                 f"{reference_guide} "
-                f"Zone instructions: {plan_text}. User direction: {base_prompt}"
+                f"Zone instructions: {plan_text}. User direction: {base_prompt}. {realism_suffix}"
             )
 
         size = "4K" if quality == "ultra" else "2K"
@@ -580,6 +532,9 @@ class ArchitecturalRenderer:
                 *[prepare_input_path(path, temp_files) for path in material_paths],
             ]
 
+            ref_w, ref_h = self._get_image_size_with_exif(prepared_paths[0])
+            aspect_ratio_token = self._closest_aspect_ratio_token(ref_w, ref_h)
+
             image_inputs = [Path(path) for path in prepared_paths]
             capture_suffix = Path(prepared_paths[0]).suffix.lower()
             output_format = "png" if capture_suffix == ".png" else "jpg"
@@ -593,7 +548,7 @@ class ArchitecturalRenderer:
                         "Do not crop, do not zoom, and do not remove scene elements from reference image 1."
                     ),
                     "image_input": image_inputs,
-                    "aspect_ratio": "match_input_image",
+                    "aspect_ratio": aspect_ratio_token,
                     "output_format": output_format,
                 }
                 output = self._run_replicate(replicate, settings.replicate_material_model, nano_payload)
@@ -602,7 +557,7 @@ class ArchitecturalRenderer:
                     "prompt": prompt_text,
                     "image_input": image_inputs,
                     "size": size,
-                    "aspect_ratio": "match_input_image",
+                    "aspect_ratio": aspect_ratio_token,
                     "sequential_image_generation": "disabled",
                     "max_images": 1,
                 }
@@ -624,7 +579,7 @@ class ArchitecturalRenderer:
                             "Do not crop, do not zoom, and do not remove scene elements from reference image 1."
                         ),
                         "image_input": image_inputs,
-                        "aspect_ratio": "match_input_image",
+                        "aspect_ratio": aspect_ratio_token,
                         "output_format": output_format,
                     }
                     output = self._run_replicate(replicate, fallback_model, fallback_payload)

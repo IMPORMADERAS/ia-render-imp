@@ -19,6 +19,7 @@ const priceMaterials = document.getElementById("price-materials");
 const priceText2img = document.getElementById("price-text2img");
 const priceInfluencer = document.getElementById("price-influencer");
 const priceChat = document.getElementById("price-chat");
+const priceChatImage = document.getElementById("price-chat-image");
 const priceMusic8 = document.getElementById("price-music-8");
 const priceMusic15 = document.getElementById("price-music-15");
 const priceMusic30 = document.getElementById("price-music-30");
@@ -175,6 +176,7 @@ function fillCopPricingForm(pricing) {
   setInputValue(priceText2img, moduleCop.text2img ?? toCop(moduleUsd.text2img));
   setInputValue(priceInfluencer, moduleCop.influencer ?? toCop(moduleUsd.influencer));
   setInputValue(priceChat, moduleCop.chat ?? toCop(moduleUsd.chat));
+  setInputValue(priceChatImage, moduleCop.chat_image ?? toCop(moduleUsd.chat_image));
   setInputValue(priceMusic8, musicCop["8"] ?? toCop(musicUsd["8"]));
   setInputValue(priceMusic15, musicCop["15"] ?? toCop(musicUsd["15"]));
   setInputValue(priceMusic30, musicCop["30"] ?? toCop(musicUsd["30"]));
@@ -208,6 +210,7 @@ function buildPricingFromCopForm() {
     text2img: parseCopInput(priceText2img),
     influencer: parseCopInput(priceInfluencer),
     chat: parseCopInput(priceChat),
+    chat_image: parseCopInput(priceChatImage),
   };
   base.module_price_cop = moduleCop;
   base.module_usd.img2img = copToUsd(moduleCop.img2img, base);
@@ -215,6 +218,7 @@ function buildPricingFromCopForm() {
   base.module_usd.text2img = copToUsd(moduleCop.text2img, base);
   base.module_usd.influencer = copToUsd(moduleCop.influencer, base);
   base.module_usd.chat = copToUsd(moduleCop.chat, base);
+  base.module_usd.chat_image = copToUsd(moduleCop.chat_image, base);
 
   const musicCop = {
     "8": parseCopInput(priceMusic8),

@@ -132,3 +132,11 @@ def module_cost_chat_cop() -> int:
     if "chat" in module_prices:
         return _to_int_cop(module_prices.get("chat"))
     return to_psychological_cop(usd_to_cop_with_margin(_module_usd("chat", 0.01)))
+
+
+def module_cost_chat_image_cop() -> int:
+    pricing = _pricing()
+    module_prices = pricing.get("module_price_cop", {})
+    if "chat_image" in module_prices:
+        return _to_int_cop(module_prices.get("chat_image"))
+    return to_psychological_cop(usd_to_cop_with_margin(_module_usd("chat_image", 0.04)))

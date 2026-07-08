@@ -12,10 +12,13 @@ def build_arch_prompt(base_prompt: str, style: str, lighting_mode: str = "aftern
     style_text = STYLE_PROMPTS.get(style, STYLE_PROMPTS["editorial"])
     lighting_text = LIGHTING_PROMPTS.get(lighting_mode, LIGHTING_PROMPTS["afternoon"])
     return (
-        "ultra realistic architectural visualization, physically based rendering, "
+        "ultra realistic architectural visualization converted into real photo look, physically based rendering, "
         "global illumination, path-traced look, architectural photography composition, "
         "well-exposed image, soft ambient bounce light, "
         "high dynamic range, detailed materials, realistic shadows without underexposure, "
+        "remove viewport/cad style, remove technical line-art look, remove flat shaded surfaces, "
+        "remove schematic appearance, remove drawing-like outlines, "
+        "produce a believable built-space photograph with natural depth and camera optics, "
         f"{lighting_text}, {style_text}, {base_prompt}"
     )
 

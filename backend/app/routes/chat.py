@@ -13,7 +13,7 @@ from pydantic import BaseModel
 from ..config import settings
 from ..services.renderer import renderer
 from ..services.auth_wallet import AuthenticatedUser, InsufficientBalanceError, credit_balance, debit_balance, require_authenticated_user
-from ..services.billing import module_cost_chat_cop
+from ..services.billing import module_cost_chat_cop, module_cost_chat_image_cop
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 CHAT_EXPORTS_DIR = Path(settings.data_dir) / "chat_exports"
@@ -346,6 +346,13 @@ def _looks_like_image_transform_request(text: str) -> bool:
         "crea",
         "crear",
         "haz",
+        "usa",
+        "utiliza",
+        "aplica",
+        "coloca",
+        "pon",
+        "integra",
+        "incorpora",
         "transforma",
         "transformar",
         "mejora",
@@ -358,9 +365,20 @@ def _looks_like_image_transform_request(text: str) -> bool:
     reference_terms = [
         "con esta imagen",
         "con esa imagen",
+        "este logo",
+        "ese logo",
         "con el logo adjunto",
         "con logo adjunto",
         "logo adjunto",
+        "archivo adjunto",
+        "con este archivo",
+        "con ese archivo",
+        "archivo que adjunte",
+        "archivo que subi",
+        "logo que te comparto",
+        "te comparto",
+        "adjunto",
+        "adjuntos",
         "logo que adjunte",
         "logo que subi",
         "esta imagen",
@@ -379,7 +397,9 @@ def _looks_like_image_transform_request(text: str) -> bool:
         "a partir de",
     ]
 
-    return any(term in compact for term in action_terms) and any(term in compact for term in reference_terms)
+    has_action = any(term in compact for term in action_terms)
+    has_reference_hint = any(term in compact for term in reference_terms)
+    return has_action and has_reference_hint
 
 
 def _save_chat_model_output(output: object, output_image_path: str) -> None:
@@ -723,10 +743,26 @@ async def chat_message(request: Request, user: AuthenticatedUser = Depends(requi
     if not message and not effective_attachments:
         raise HTTPException(status_code=400, detail="El mensaje no puede estar vacio")
 
-    billed_amount = module_cost_chat_cop()
+    reference_image = _first_image_attachment_path(effective_attachments)
+    wants_chat_image = False
+    if reference_image is not None and (
+        _looks_like_image_transform_request(message) or _looks_like_image_request(message)
+    ):
+        wants_chat_image = True
+    elif _looks_like_image_request(message):
+        wants_chat_image = True
+
+    billed_amount = module_cost_chat_image_cop() if wants_chat_image else module_cost_chat_cop()
+    debit_module = "chat_image" if wants_chat_image else "chat"
+    debit_note = "Generacion de imagen en Pachy IA" if wants_chat_image else "Consulta Pachy IA"
     try:
-        debit_balance(user.user_id, billed_amount, "chat", "Consulta Pachy IA")
+        debit_balance(user.user_id, billed_amount, debit_module, debit_note)
     except InsufficientBalanceError as exc:
+        if wants_chat_image:
+            raise HTTPException(
+                status_code=402,
+                detail="Saldo insuficiente. Recarga tu cuenta para generar imagenes con Pachy IA.",
+            ) from exc
         raise HTTPException(status_code=402, detail="Saldo insuficiente. Recarga tu cuenta para usar Pachy IA.") from exc
 
     try:
@@ -734,38 +770,38 @@ async def chat_message(request: Request, user: AuthenticatedUser = Depends(requi
         if default_answer:
             return {"answer": default_answer, "model": "policy:ia-imp-default", "attachments": effective_attachments}
 
-        if effective_attachments and _looks_like_image_transform_request(message):
-            reference_image = _first_image_attachment_path(effective_attachments)
-            if reference_image is not None:
-                file_name = f"chat-image-{uuid4()}.png"
-                output_path = _safe_export_path(file_name)
-                prompt_text = message or "Genera una version mejorada basada en la imagen adjunta"
-                used_model = "tool:img2img-from-attachment"
-                try:
-                    used_model = _generate_from_reference_image(
-                        reference_image_path=str(reference_image),
-                        prompt_text=prompt_text,
-                        output_image_path=str(output_path),
-                    )
-                except Exception:
-                    renderer.generate(
-                        input_image_path=str(reference_image),
-                        output_image_path=str(output_path),
-                        prompt=prompt_text,
-                        negative_prompt="low quality, blurry, watermark, deformed",
-                        steps=30,
-                        guidance_scale=7.0,
-                        quality="balanced",
-                        seed=None,
-                    )
-                return {
-                    "answer": (
-                        "Listo, usé tu imagen adjunta como referencia para generar el resultado. "
-                        f"Descarga aquí: /chat/files/{file_name}"
-                    ),
-                    "model": used_model,
-                    "attachments": effective_attachments,
-                }
+        if reference_image is not None and (
+            _looks_like_image_transform_request(message) or _looks_like_image_request(message)
+        ):
+            file_name = f"chat-image-{uuid4()}.png"
+            output_path = _safe_export_path(file_name)
+            prompt_text = message or "Genera una version mejorada basada en la imagen adjunta"
+            used_model = "tool:img2img-from-attachment"
+            try:
+                used_model = _generate_from_reference_image(
+                    reference_image_path=str(reference_image),
+                    prompt_text=prompt_text,
+                    output_image_path=str(output_path),
+                )
+            except Exception:
+                renderer.generate(
+                    input_image_path=str(reference_image),
+                    output_image_path=str(output_path),
+                    prompt=prompt_text,
+                    negative_prompt="low quality, blurry, watermark, deformed",
+                    steps=30,
+                    guidance_scale=7.0,
+                    quality="balanced",
+                    seed=None,
+                )
+            return {
+                "answer": (
+                    "Listo, usé tu imagen adjunta como referencia para generar el resultado. "
+                    f"Descarga aquí: /chat/files/{file_name}"
+                ),
+                "model": used_model,
+                "attachments": effective_attachments,
+            }
 
         if _looks_like_excel_request(message):
             file_name = f"cotizacion-{uuid4()}.xlsx"
@@ -881,7 +917,9 @@ async def chat_message(request: Request, user: AuthenticatedUser = Depends(requi
         return {"answer": answer, "model": used_model, "attachments": effective_attachments}
     except Exception as exc:
         try:
-            credit_balance(user.user_id, billed_amount, "chat_refund", "Reembolso por fallo en Pachy IA")
+            refund_module = "chat_image_refund" if wants_chat_image else "chat_refund"
+            refund_note = "Reembolso por fallo en imagen Pachy IA" if wants_chat_image else "Reembolso por fallo en Pachy IA"
+            credit_balance(user.user_id, billed_amount, refund_module, refund_note)
         except Exception:
             pass
         if isinstance(exc, HTTPException):

@@ -22,8 +22,11 @@ DEFAULT_PRICING: dict[str, Any] = {
         "text2img": 0.039,
         "influencer": 0.9,
         "chat": 0.01,
+        "chat_image": 0.04,
     },
-    "module_price_cop": {},
+    "module_price_cop": {
+        "chat_image": 250,
+    },
     "music_duration_usd": {
         "8": 0.08,
         "15": 0.15,
@@ -44,6 +47,7 @@ DEFAULT_PRICING: dict[str, Any] = {
         "influencer": "Influencer (p-video-animate 1080p, hasta 15s)",
         "music": "Musica IA (Music 2.6)",
         "chat": "Pachy IA (GPT-4o)",
+        "chat_image": "Pachy IA (Imagen)",
     },
 }
 
