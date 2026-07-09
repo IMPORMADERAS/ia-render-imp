@@ -20,7 +20,7 @@ class Settings(BaseSettings):
     replicate_chat_model: str = "openai/gpt-4o"
     replicate_music_model: str = "minimax/music-2.6"
     replicate_song_model: str = "minimax/music-2.6"
-    replicate_material_model: str = "black-forest-labs/flux-kontext-pro"
+    replicate_material_model: str = "google/nano-banana"
     replicate_influencer_model: str = "prunaai/p-video-animate"
     wompi_public_key: str = ""
     wompi_private_key: str = ""

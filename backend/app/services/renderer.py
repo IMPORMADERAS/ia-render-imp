@@ -7,7 +7,7 @@ from time import perf_counter
 from time import sleep
 from typing import Optional
 
-from PIL import Image, ImageFilter, ImageOps
+from PIL import Image, ImageEnhance, ImageFilter, ImageOps, ImageStat
 
 from ..config import settings
 
@@ -132,6 +132,79 @@ class ArchitecturalRenderer:
         }
         return min(candidates.keys(), key=lambda key: abs(candidates[key] - ratio))
 
+    def _material_palette_hint(self, material_paths: list[str]) -> str:
+        hints: list[str] = []
+        for raw_path in material_paths[:2]:
+            name = Path(raw_path).stem.replace("-", " ").strip() or "material"
+            try:
+                with Image.open(raw_path) as img_raw:
+                    img = ImageOps.exif_transpose(img_raw).convert("RGB")
+                    img = img.resize((96, 96), Image.Resampling.BILINEAR)
+                    palette = img.convert("P", palette=Image.Palette.ADAPTIVE, colors=4).convert("RGB")
+                    colors = palette.getcolors(maxcolors=96 * 96) or []
+                    colors_sorted = sorted(colors, key=lambda item: item[0], reverse=True)
+                    hexes: list[str] = []
+                    for _, rgb in colors_sorted:
+                        if not isinstance(rgb, tuple) or len(rgb) < 3:
+                            continue
+                        r, g, b = int(rgb[0]), int(rgb[1]), int(rgb[2])
+                        hexes.append(f"#{r:02x}{g:02x}{b:02x}")
+                        if len(hexes) >= 3:
+                            break
+                    if hexes:
+                        hints.append(f"{name}: {', '.join(hexes)}")
+                    else:
+                        hints.append(name)
+            except Exception:
+                hints.append(name)
+        return " | ".join(hints) if hints else ""
+
+    def _photoreal_materials_polish(self, image_path: str, reference_image_path: str | None = None) -> None:
+        target = Path(image_path)
+        if not target.exists():
+            return
+
+        with Image.open(target) as raw:
+            img = ImageOps.exif_transpose(raw).convert("RGB")
+
+            if reference_image_path:
+                ref_path = Path(reference_image_path)
+                if ref_path.exists():
+                    with Image.open(ref_path) as ref_raw:
+                        ref = ImageOps.exif_transpose(ref_raw).convert("RGB").resize(img.size, Image.Resampling.LANCZOS)
+                        gy, gcb, gcr = img.convert("YCbCr").split()
+                        ry, _, _ = ref.convert("YCbCr").split()
+                        blended_y = Image.blend(gy, ry, 0.58)
+                        blended_y = ImageEnhance.Contrast(blended_y).enhance(1.06)
+                        img = Image.merge("YCbCr", (blended_y, gcb, gcr)).convert("RGB")
+                        # Recover natural scene response from the original capture
+                        # while preserving edited materials from the generated image.
+                        img = Image.blend(img, ref, 0.2)
+
+            # Keep a subtle, realistic look: recover local contrast and crispness
+            # without introducing artificial HDR or over-saturation.
+            img = ImageOps.autocontrast(img, cutoff=0.6)
+            img = ImageEnhance.Brightness(img).enhance(0.99)
+            img = ImageEnhance.Contrast(img).enhance(1.08)
+            img = ImageEnhance.Color(img).enhance(0.9)
+            img = ImageEnhance.Sharpness(img).enhance(1.1)
+            img = img.filter(ImageFilter.UnsharpMask(radius=1.2, percent=110, threshold=2))
+
+            # Adaptive gray-world normalization to reduce synthetic color cast.
+            mean_r, mean_g, mean_b = ImageStat.Stat(img).mean[:3]
+            target_mean = (mean_r + mean_g + mean_b) / 3.0
+            fr = max(0.9, min(1.1, target_mean / max(1.0, mean_r)))
+            fg = max(0.9, min(1.1, target_mean / max(1.0, mean_g)))
+            fb = max(0.9, min(1.1, target_mean / max(1.0, mean_b)))
+
+            r, g, b = img.split()
+            r = r.point(lambda value: max(0, min(255, int(value * fr))))
+            g = g.point(lambda value: max(0, min(255, int(value * fg))))
+            b = b.point(lambda value: max(0, min(255, int(value * fb))))
+            img = Image.merge("RGB", (r, g, b))
+
+            img.save(target)
+
     def _realism_suffix(self, quality: str) -> str:
         base = (
             "Transform into a photorealistic architectural photograph. "
@@ -230,6 +303,7 @@ class ArchitecturalRenderer:
         guidance_scale: float,
         quality: str,
         seed: Optional[int] = None,
+        model_override: Optional[str] = None,
     ) -> dict[str, int | str]:
         started = perf_counter()
 
@@ -251,7 +325,7 @@ class ArchitecturalRenderer:
             else:
                 run_steps = steps
 
-            configured_model = str(settings.replicate_model or "").strip()
+            configured_model = str(model_override or settings.replicate_model or "").strip()
             model_id = (configured_model or DEFAULT_IMG2IMG_MODEL).lower()
             effective_model = configured_model or DEFAULT_IMG2IMG_MODEL
             configured_field = settings.replicate_input_image_field.strip() or "input_image"
@@ -513,13 +587,6 @@ class ArchitecturalRenderer:
                 f"{built_photo_directive} "
                 f"User direction: {base_prompt}. {realism_suffix}"
             )
-            flux_prompt_text = (
-                "Transform the architectural capture into a photorealistic built-space photograph. "
-                "Apply the selected material look faithfully using this material palette: "
-                f"{material_summary}. "
-                "Keep geometry, perspective, scale, and framing unchanged. "
-                f"{built_photo_directive} User direction: {base_prompt}. {realism_suffix}"
-            )
         else:
             plan_text = material_plan.strip() or "Apply each selected material to the most suitable zones while preserving all other areas."
             prompt_text = (
@@ -530,19 +597,42 @@ class ArchitecturalRenderer:
                 f"{built_photo_directive} "
                 f"Zone instructions: {plan_text}. User direction: {base_prompt}. {realism_suffix}"
             )
-            flux_prompt_text = (
-                "Transform the architectural capture into a photorealistic built-space photograph. "
-                f"Use this material palette: {material_summary}. "
-                f"Apply materials by zones following this instruction: {plan_text}. "
-                "Keep geometry, perspective, scale, and framing unchanged. "
-                f"{built_photo_directive} User direction: {base_prompt}. {realism_suffix}"
-            )
 
-        size = "4K" if quality == "ultra" else "2K"
-        output: object | None = None
+        selected_materials = ", ".join(material_labels) if material_labels else "selected references"
+        palette_hint = self._material_palette_hint(material_paths)
+        zone_text = material_plan.strip() if mode == "zones" else ""
+        realism_guardrail = (
+            "Output must look like a real architectural photograph of a built interior, "
+            "with natural global illumination, realistic dynamic range, grounded contact shadows, "
+            "physically plausible reflections, and subtle camera optics. "
+            "Avoid CGI, flat shading, toon look, synthetic plastic appearance, and color cast contamination. "
+            "Avoid green, cyan, or yellow dominant tint; keep neutral white balance and believable daylight colorimetry."
+        )
+        surface_scope = (
+            "Apply selected materials only on carpentry/wood finish surfaces (cabinetry, wood cladding, shelves, and related wood trims). "
+            "Keep glass, metals, refrigerators, floor terrazzo, tables, chairs, and white walls unchanged unless explicitly requested."
+        )
+        material_prompt = (
+            "Architectural material replacement from selected swatches. "
+            f"Use ONLY these selected materials: {selected_materials}. "
+            f"Palette hints from selected swatches: {palette_hint}. "
+            "Do not invent extra colors or unselected finishes. "
+            f"{surface_scope} "
+            "Keep geometry, perspective, framing, and scene elements unchanged. "
+            f"{('Zone instructions: ' + zone_text + '. ') if zone_text else ''}"
+            f"User direction: {base_prompt}. {realism_suffix} {realism_guardrail}"
+        )
+
         configured_material_model = str(settings.replicate_material_model or "").strip()
-        effective_material_model = configured_material_model or DEFAULT_IMG2IMG_MODEL
-        used_model = effective_material_model
+        candidate_models: list[str] = []
+        if configured_material_model:
+            candidate_models.append(configured_material_model)
+        if "google/nano-banana" not in candidate_models:
+            candidate_models.append("google/nano-banana")
+
+        output: object | None = None
+        used_model = candidate_models[0]
+        last_error: Exception | None = None
 
         def prepare_input_path(path: str, temp_files: list[str]) -> str:
             suffix = Path(path).suffix.lower()
@@ -565,76 +655,38 @@ class ArchitecturalRenderer:
 
             ref_w, ref_h = self._get_image_size_with_exif(prepared_paths[0])
             aspect_ratio_token = self._closest_aspect_ratio_token(ref_w, ref_h)
-
             image_inputs = [Path(path) for path in prepared_paths]
             capture_suffix = Path(prepared_paths[0]).suffix.lower()
             output_format = "png" if capture_suffix == ".png" else "jpg"
-            material_model = effective_material_model.strip().lower()
 
-            if "flux-kontext" in material_model:
-                return self._generate_replicate(
-                    input_image_path=prepared_paths[0],
-                    output_image_path=output_image_path,
-                    prompt=flux_prompt_text,
-                    negative_prompt="cartoon, cgi, viewport, clay render, flat shading, stylized illustration, low quality, blurry, distorted geometry",
-                    steps=30 if quality == "fast" else 35 if quality == "balanced" else 50,
-                    guidance_scale=6.5 if quality != "ultra" else 7.0,
-                    quality=quality,
-                    seed=seed,
-                )
+            nano_payload = {
+                "prompt": (
+                    f"{material_prompt} Keep exactly the same framing and scene coverage as reference image 1. "
+                    "Do not crop, do not zoom, and do not remove scene elements from reference image 1."
+                ),
+                "image_input": image_inputs,
+                "aspect_ratio": aspect_ratio_token,
+                "output_format": output_format,
+            }
+            if seed is not None:
+                nano_payload["seed"] = int(seed)
 
-            if "nano-banana" in material_model:
-                used_model = effective_material_model
-                nano_payload = {
-                    "prompt": (
-                        f"{prompt_text} Keep exactly the same framing and scene coverage as reference image 1. "
-                        "Do not crop, do not zoom, and do not remove scene elements from reference image 1."
-                    ),
-                    "image_input": image_inputs,
-                    "aspect_ratio": aspect_ratio_token,
-                    "output_format": output_format,
-                }
-                output = self._run_replicate(replicate, effective_material_model, nano_payload)
-            else:
-                seedream_payload = {
-                    "prompt": prompt_text,
-                    "image_input": image_inputs,
-                    "size": size,
-                    "aspect_ratio": aspect_ratio_token,
-                    "sequential_image_generation": "disabled",
-                    "max_images": 1,
-                }
-                if seed is not None:
-                    seedream_payload["seed"] = int(seed)
-
+            for model_id in candidate_models:
                 try:
-                    output = self._run_replicate(replicate, effective_material_model, seedream_payload)
+                    output = self._run_replicate(replicate, model_id, nano_payload)
+                    used_model = model_id
+                    break
                 except Exception as exc:
-                    message = str(exc).lower()
-                    if "unknown file extension" not in message:
-                        raise
+                    last_error = exc
 
-                    fallback_model = "google/nano-banana"
-                    used_model = fallback_model
-                    fallback_payload = {
-                        "prompt": (
-                            f"{prompt_text} Keep exactly the same framing and scene coverage as reference image 1. "
-                            "Do not crop, do not zoom, and do not remove scene elements from reference image 1."
-                        ),
-                        "image_input": image_inputs,
-                        "aspect_ratio": aspect_ratio_token,
-                        "output_format": output_format,
-                    }
-                    output = self._run_replicate(replicate, fallback_model, fallback_payload)
+            if output is None:
+                raise RuntimeError(f"El modelo de materiales no devolvio salida: {last_error}")
         finally:
             for temp_path in temp_files:
                 try:
                     Path(temp_path).unlink(missing_ok=True)
                 except Exception:
                     pass
-
-        if output is None:
-            raise RuntimeError("El modelo de materiales no devolvio salida")
 
         first_output = output
         if isinstance(output, list):
@@ -643,15 +695,50 @@ class ArchitecturalRenderer:
             first_output = output[0]
 
         self._save_remote_output(first_output, output_image_path)
+        flux_refine_prompt = (
+            "Photoreal refinement pass while preserving the material replacement exactly as applied. "
+            f"Keep ONLY selected materials visible: {selected_materials}. "
+            "Do not change material identities, do not swap colors, and do not introduce unselected finishes. "
+            "Keep geometry, composition, perspective, and object positions unchanged. "
+            "Enhance only realism: natural interior lighting, believable reflections, lens response, depth, and texture micro-detail."
+        )
+        refined_output_path = str(
+            Path(output_image_path).with_name(
+                f"{Path(output_image_path).stem}-flux-refine{Path(output_image_path).suffix}"
+            )
+        )
+        try:
+            self._generate_replicate(
+                input_image_path=output_image_path,
+                output_image_path=refined_output_path,
+                prompt=flux_refine_prompt,
+                negative_prompt=(
+                    "cartoon, cgi, viewport, flat shading, color cast, wrong material colors, "
+                    "unselected materials, blurry, distorted geometry"
+                ),
+                steps=28 if quality == "fast" else 34 if quality == "balanced" else 46,
+                guidance_scale=6.2 if quality != "ultra" else 6.8,
+                quality="balanced" if quality == "fast" else quality,
+                seed=seed,
+                model_override=DEFAULT_IMG2IMG_MODEL,
+            )
+            Path(refined_output_path).replace(output_image_path)
+        finally:
+            try:
+                Path(refined_output_path).unlink(missing_ok=True)
+            except Exception:
+                pass
+
         self._enforce_reference_aspect_ratio(input_image_path, output_image_path)
+        self._photoreal_materials_polish(output_image_path, input_image_path)
         self._normalize_to_full_hd(input_image_path, output_image_path)
 
         duration = int(perf_counter() - started)
         return {
-            "mode": "replicate_materials",
+            "mode": "replicate_materials_nano_flux",
             "duration_seconds": max(1, duration),
             "material_count": len(material_paths),
-            "model": used_model,
+            "model": f"{used_model}+{DEFAULT_IMG2IMG_MODEL}",
             "output_format": output_format,
         }
 
