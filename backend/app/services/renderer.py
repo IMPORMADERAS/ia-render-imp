@@ -488,6 +488,13 @@ class ArchitecturalRenderer:
                 "Prioritize faithful material texture, color, grain direction, and finish from the selected references."
             )
         reference_guide = " ".join(reference_guide_parts)
+        built_photo_directive = (
+            "The final result must read as a believable architectural photograph of a real built space, "
+            "with natural lens behavior, subtle imperfections, realistic exposure rolloff, grounded contact shadows, "
+            "physically plausible reflections, and true material depth. "
+            "Avoid CGI render look, avoid showroom visualization look, avoid flat shaded surfaces, "
+            "avoid cartoon cleanliness, and avoid conceptual illustration aesthetics."
+        )
 
         base_prompt = prompt.strip()
         realism_suffix = self._realism_suffix(quality)
@@ -497,6 +504,7 @@ class ArchitecturalRenderer:
                 "Keep the geometry, perspective, camera framing, and scale unchanged. "
                 "Apply a natural material blend with photorealistic lighting and texture scale. "
                 f"{reference_guide} "
+                f"{built_photo_directive} "
                 f"User direction: {base_prompt}. {realism_suffix}"
             )
         else:
@@ -506,6 +514,7 @@ class ArchitecturalRenderer:
                 "Keep geometry, perspective, and composition unchanged. "
                 "Preserve realism and material scale. "
                 f"{reference_guide} "
+                f"{built_photo_directive} "
                 f"Zone instructions: {plan_text}. User direction: {base_prompt}. {realism_suffix}"
             )
 

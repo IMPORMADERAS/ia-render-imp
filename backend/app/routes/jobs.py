@@ -471,13 +471,17 @@ async def create_material_render_job(
             if safe_mode == "mix":
                 full_prompt = (
                     f"{full_prompt}. Usa los materiales de referencia para una mezcla equilibrada y realista en superficies arquitectonicas. "
-                    "No alteres geometria, perspectiva ni composicion del modelado."
+                    "No alteres geometria, perspectiva ni composicion del modelado. "
+                    "El resultado final debe verse como una fotografia arquitectonica real de un espacio construido, "
+                    "no como render CGI, viewport, ilustracion ni visualizacion conceptual."
                 )
             else:
                 plan_text = material_plan.strip() or "Distribuye los materiales en zonas coherentes sin alterar la estructura principal"
                 full_prompt = (
                     f"{full_prompt}. Aplica materiales por zonas segun esta instruccion: {plan_text}. "
-                    "Conserva geometria, escala y encuadre original."
+                    "Conserva geometria, escala y encuadre original. "
+                    "El resultado final debe verse como una fotografia arquitectonica real de un espacio construido, "
+                    "no como render CGI, viewport, ilustracion ni visualizacion conceptual."
                 )
 
             update_job(
