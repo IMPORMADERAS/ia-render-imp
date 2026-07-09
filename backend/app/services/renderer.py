@@ -11,6 +11,7 @@ from PIL import Image, ImageFilter, ImageOps
 
 from ..config import settings
 
+DEFAULT_IMG2IMG_MODEL = "black-forest-labs/flux-kontext-pro"
 
 class ArchitecturalRenderer:
     def __init__(self) -> None:
@@ -250,16 +251,20 @@ class ArchitecturalRenderer:
             else:
                 run_steps = steps
 
-            model_id = settings.replicate_model.strip().lower()
+            configured_model = str(settings.replicate_model or "").strip()
+            model_id = (configured_model or DEFAULT_IMG2IMG_MODEL).lower()
+            effective_model = configured_model or DEFAULT_IMG2IMG_MODEL
             configured_field = settings.replicate_input_image_field.strip() or "input_image"
             boosted_prompt = f"{prompt} {self._realism_suffix(quality)}"
 
             if "flux-kontext" in model_id:
+                output_format = "png" if quality == "ultra" else "jpg"
+                prompt_upsampling = quality == "ultra"
                 kontext_common = {
                     "prompt": boosted_prompt,
                     "aspect_ratio": aspect_ratio_token,
-                    "output_format": "png",
-                    "prompt_upsampling": True,
+                    "output_format": output_format,
+                    "prompt_upsampling": prompt_upsampling,
                     "safety_tolerance": 2,
                 }
                 if seed is not None:
@@ -295,7 +300,7 @@ class ArchitecturalRenderer:
             for payload in attempts:
                 image_file.seek(0)
                 try:
-                    output = self._run_replicate(replicate, settings.replicate_model, payload)
+                    output = self._run_replicate(replicate, effective_model, payload)
                     break
                 except Exception as exc:
                     last_error = exc
@@ -495,6 +500,7 @@ class ArchitecturalRenderer:
             "Avoid CGI render look, avoid showroom visualization look, avoid flat shaded surfaces, "
             "avoid cartoon cleanliness, and avoid conceptual illustration aesthetics."
         )
+        material_summary = ", ".join(material_labels) if material_labels else "selected material references"
 
         base_prompt = prompt.strip()
         realism_suffix = self._realism_suffix(quality)
@@ -507,6 +513,13 @@ class ArchitecturalRenderer:
                 f"{built_photo_directive} "
                 f"User direction: {base_prompt}. {realism_suffix}"
             )
+            flux_prompt_text = (
+                "Transform the architectural capture into a photorealistic built-space photograph. "
+                "Apply the selected material look faithfully using this material palette: "
+                f"{material_summary}. "
+                "Keep geometry, perspective, scale, and framing unchanged. "
+                f"{built_photo_directive} User direction: {base_prompt}. {realism_suffix}"
+            )
         else:
             plan_text = material_plan.strip() or "Apply each selected material to the most suitable zones while preserving all other areas."
             prompt_text = (
@@ -517,10 +530,19 @@ class ArchitecturalRenderer:
                 f"{built_photo_directive} "
                 f"Zone instructions: {plan_text}. User direction: {base_prompt}. {realism_suffix}"
             )
+            flux_prompt_text = (
+                "Transform the architectural capture into a photorealistic built-space photograph. "
+                f"Use this material palette: {material_summary}. "
+                f"Apply materials by zones following this instruction: {plan_text}. "
+                "Keep geometry, perspective, scale, and framing unchanged. "
+                f"{built_photo_directive} User direction: {base_prompt}. {realism_suffix}"
+            )
 
         size = "4K" if quality == "ultra" else "2K"
         output: object | None = None
-        used_model = settings.replicate_material_model
+        configured_material_model = str(settings.replicate_material_model or "").strip()
+        effective_material_model = configured_material_model or DEFAULT_IMG2IMG_MODEL
+        used_model = effective_material_model
 
         def prepare_input_path(path: str, temp_files: list[str]) -> str:
             suffix = Path(path).suffix.lower()
@@ -547,10 +569,22 @@ class ArchitecturalRenderer:
             image_inputs = [Path(path) for path in prepared_paths]
             capture_suffix = Path(prepared_paths[0]).suffix.lower()
             output_format = "png" if capture_suffix == ".png" else "jpg"
-            material_model = settings.replicate_material_model.strip().lower()
+            material_model = effective_material_model.strip().lower()
+
+            if "flux-kontext" in material_model:
+                return self._generate_replicate(
+                    input_image_path=prepared_paths[0],
+                    output_image_path=output_image_path,
+                    prompt=flux_prompt_text,
+                    negative_prompt="cartoon, cgi, viewport, clay render, flat shading, stylized illustration, low quality, blurry, distorted geometry",
+                    steps=30 if quality == "fast" else 35 if quality == "balanced" else 50,
+                    guidance_scale=6.5 if quality != "ultra" else 7.0,
+                    quality=quality,
+                    seed=seed,
+                )
 
             if "nano-banana" in material_model:
-                used_model = settings.replicate_material_model
+                used_model = effective_material_model
                 nano_payload = {
                     "prompt": (
                         f"{prompt_text} Keep exactly the same framing and scene coverage as reference image 1. "
@@ -560,7 +594,7 @@ class ArchitecturalRenderer:
                     "aspect_ratio": aspect_ratio_token,
                     "output_format": output_format,
                 }
-                output = self._run_replicate(replicate, settings.replicate_material_model, nano_payload)
+                output = self._run_replicate(replicate, effective_material_model, nano_payload)
             else:
                 seedream_payload = {
                     "prompt": prompt_text,
@@ -574,7 +608,7 @@ class ArchitecturalRenderer:
                     seedream_payload["seed"] = int(seed)
 
                 try:
-                    output = self._run_replicate(replicate, settings.replicate_material_model, seedream_payload)
+                    output = self._run_replicate(replicate, effective_material_model, seedream_payload)
                 except Exception as exc:
                     message = str(exc).lower()
                     if "unknown file extension" not in message:
