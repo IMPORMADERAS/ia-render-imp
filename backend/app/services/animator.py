@@ -6,6 +6,8 @@ from pathlib import Path
 from time import perf_counter
 from time import sleep
 
+from PIL import Image, ImageOps
+
 from ..config import settings
 
 
@@ -138,6 +140,18 @@ class Animator:
             return None
 
     @staticmethod
+    def _probe_image_size(image_path: str) -> tuple[int, int] | None:
+        try:
+            with Image.open(image_path) as raw:
+                img = ImageOps.exif_transpose(raw)
+                width, height = img.size
+                if width <= 0 or height <= 0:
+                    return None
+                return int(width), int(height)
+        except Exception:
+            return None
+
+    @staticmethod
     def _round_even(value: int) -> int:
         safe_value = max(2, int(value))
         return safe_value if safe_value % 2 == 0 else safe_value - 1
@@ -162,6 +176,62 @@ class Animator:
         else:
             crop_w = self._round_even(out_w)
             crop_h = self._round_even(int(round(out_w / source_ratio)))
+
+        if crop_w <= 0 or crop_h <= 0 or crop_w > out_w or crop_h > out_h:
+            return
+
+        crop_x = max(0, (out_w - crop_w) // 2)
+        crop_y = max(0, (out_h - crop_h) // 2)
+
+        if crop_x == 0 and crop_y == 0 and crop_w == out_w and crop_h == out_h:
+            return
+
+        target = Path(output_video_path)
+        temp_path = target.with_name(f"{target.stem}.cropped{target.suffix}")
+        cmd = [
+            "ffmpeg",
+            "-y",
+            "-i",
+            output_video_path,
+            "-vf",
+            f"crop={crop_w}:{crop_h}:{crop_x}:{crop_y}",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "veryfast",
+            "-crf",
+            "18",
+            "-c:a",
+            "copy",
+            str(temp_path),
+        ]
+        try:
+            subprocess.run(cmd, check=True, capture_output=True, text=True)
+            temp_path.replace(target)
+        finally:
+            if temp_path.exists():
+                temp_path.unlink(missing_ok=True)
+
+    def _crop_video_to_target_aspect_ratio(self, output_video_path: str, target_width: int, target_height: int) -> None:
+        output_size = self._probe_video_size(output_video_path)
+        if output_size is None:
+            return
+        if target_width <= 0 or target_height <= 0:
+            return
+
+        out_w, out_h = output_size
+        target_ratio = target_width / target_height
+        output_ratio = out_w / out_h
+
+        if abs(target_ratio - output_ratio) <= 0.01:
+            return
+
+        if output_ratio > target_ratio:
+            crop_w = self._round_even(int(round(out_h * target_ratio)))
+            crop_h = self._round_even(out_h)
+        else:
+            crop_w = self._round_even(out_w)
+            crop_h = self._round_even(int(round(out_w / target_ratio)))
 
         if crop_w <= 0 or crop_h <= 0 or crop_w > out_w or crop_h > out_h:
             return
@@ -256,7 +326,17 @@ class Animator:
             output = self._run_prediction_with_polling(model=settings.replicate_influencer_model, payload=payload)
 
         self._write_output_file(output=output, target_path=output_video_path, context="influencer")
-        self._crop_video_to_match_aspect_ratio(source_video_path=source_video_path, output_video_path=output_video_path)
+
+        # Preserve the character image format (vertical/square/horizontal) to avoid black bars.
+        reference_size = self._probe_image_size(reference_image_path)
+        if reference_size is not None:
+            self._crop_video_to_target_aspect_ratio(
+                output_video_path=output_video_path,
+                target_width=reference_size[0],
+                target_height=reference_size[1],
+            )
+        else:
+            self._crop_video_to_match_aspect_ratio(source_video_path=source_video_path, output_video_path=output_video_path)
 
         duration = int(perf_counter() - started)
         return {"duration_seconds": max(1, duration), "model": settings.replicate_influencer_model}
