@@ -1,6 +1,7 @@
 import os
 import tempfile
 import urllib.request
+from contextlib import ExitStack
 from pathlib import Path
 from threading import BoundedSemaphore
 from time import perf_counter
@@ -12,6 +13,7 @@ from PIL import Image, ImageEnhance, ImageFilter, ImageOps, ImageStat
 from ..config import settings
 
 DEFAULT_IMG2IMG_MODEL = "black-forest-labs/flux-kontext-pro"
+DEFAULT_MATERIALS_MODEL = "google/nano-banana"
 
 class ArchitecturalRenderer:
     def __init__(self) -> None:
@@ -328,7 +330,6 @@ class ArchitecturalRenderer:
             configured_model = str(model_override or settings.replicate_model or "").strip()
             model_id = (configured_model or DEFAULT_IMG2IMG_MODEL).lower()
             effective_model = configured_model or DEFAULT_IMG2IMG_MODEL
-            configured_field = settings.replicate_input_image_field.strip() or "input_image"
             boosted_prompt = f"{prompt} {self._realism_suffix(quality)}"
 
             if "flux-kontext" in model_id:
@@ -345,11 +346,11 @@ class ArchitecturalRenderer:
                     kontext_common["seed"] = seed
 
                 attempts = [
-                    {**kontext_common, configured_field: image_file},
                     {**kontext_common, "input_image": image_file},
-                    {"prompt": boosted_prompt, "input_image": image_file},
+                    {"prompt": boosted_prompt, "input_image": image_file, "output_format": output_format},
                 ]
             else:
+                configured_field = settings.replicate_input_image_field.strip() or "input_image"
                 common = {
                     "prompt": boosted_prompt,
                     "negative_prompt": negative_prompt,
@@ -389,8 +390,6 @@ class ArchitecturalRenderer:
                 first_output = output[0]
 
             self._save_remote_output(first_output, output_image_path)
-            self._enforce_reference_aspect_ratio(input_image_path, output_image_path)
-            self._normalize_to_full_hd(input_image_path, output_image_path)
 
         duration = int(perf_counter() - started)
         return {"mode": "replicate", "duration_seconds": max(1, duration)}
@@ -535,7 +534,8 @@ class ArchitecturalRenderer:
         prompt: str,
         material_mode: str,
         material_plan: str,
-        quality: str,
+        material_names: Optional[list[str]] = None,
+        quality: str = "balanced",
         seed: Optional[int] = None,
     ) -> dict[str, int | str]:
         started = perf_counter()
@@ -552,53 +552,12 @@ class ArchitecturalRenderer:
             mode = "mix"
 
         material_labels = [Path(path).stem for path in material_paths]
-        reference_guide_parts = [
-            "Reference image 1 is the architectural capture and must preserve all visible scene content, geometry, perspective, camera framing, zoom, and scale.",
-        ]
-        for index, label in enumerate(material_labels, start=2):
-            reference_guide_parts.append(
-                f"Reference image {index} is material '{label}' and must be used as an actual surface texture reference."
-            )
-        if material_labels:
-            reference_guide_parts.append(
-                "Use all provided material reference images together; do not ignore any selected material."
-            )
-            reference_guide_parts.append(
-                "Prioritize faithful material texture, color, grain direction, and finish from the selected references."
-            )
-        reference_guide = " ".join(reference_guide_parts)
-        built_photo_directive = (
-            "The final result must read as a believable architectural photograph of a real built space, "
-            "with natural lens behavior, subtle imperfections, realistic exposure rolloff, grounded contact shadows, "
-            "physically plausible reflections, and true material depth. "
-            "Avoid CGI render look, avoid showroom visualization look, avoid flat shaded surfaces, "
-            "avoid cartoon cleanliness, and avoid conceptual illustration aesthetics."
-        )
-        material_summary = ", ".join(material_labels) if material_labels else "selected material references"
-
+        declared_materials = [str(name).strip() for name in (material_names or []) if str(name).strip()]
+        selected_label_source = declared_materials if declared_materials else material_labels
         base_prompt = prompt.strip()
         realism_suffix = self._realism_suffix(quality)
-        if mode == "mix":
-            prompt_text = (
-                "Edit the architectural capture using the selected material references. "
-                "Keep the geometry, perspective, camera framing, and scale unchanged. "
-                "Apply a natural material blend with photorealistic lighting and texture scale. "
-                f"{reference_guide} "
-                f"{built_photo_directive} "
-                f"User direction: {base_prompt}. {realism_suffix}"
-            )
-        else:
-            plan_text = material_plan.strip() or "Apply each selected material to the most suitable zones while preserving all other areas."
-            prompt_text = (
-                "Edit the architectural capture by placing selected materials on specific zones described by the user. "
-                "Keep geometry, perspective, and composition unchanged. "
-                "Preserve realism and material scale. "
-                f"{reference_guide} "
-                f"{built_photo_directive} "
-                f"Zone instructions: {plan_text}. User direction: {base_prompt}. {realism_suffix}"
-            )
 
-        selected_materials = ", ".join(material_labels) if material_labels else "selected references"
+        selected_materials = ", ".join(selected_label_source) if selected_label_source else "selected references"
         palette_hint = self._material_palette_hint(material_paths)
         zone_text = material_plan.strip() if mode == "zones" else ""
         realism_guardrail = (
@@ -612,26 +571,31 @@ class ArchitecturalRenderer:
             "Apply selected materials only on carpentry/wood finish surfaces (cabinetry, wood cladding, shelves, and related wood trims). "
             "Keep glass, metals, refrigerators, floor terrazzo, tables, chairs, and white walls unchanged unless explicitly requested."
         )
+        if mode == "mix":
+            mode_directive = (
+                "Blend all selected materials in a balanced and visible way across compatible carpentry surfaces. "
+                "Do not collapse to a single material. If two materials are provided, both must remain clearly present."
+            )
+        else:
+            mode_directive = (
+                "Apply materials strictly by zones using the user's zone instructions. "
+                "Respect zone boundaries and keep unmentioned zones unchanged."
+            )
+
         material_prompt = (
             "Architectural material replacement from selected swatches. "
             f"Use ONLY these selected materials: {selected_materials}. "
             f"Palette hints from selected swatches: {palette_hint}. "
             "Do not invent extra colors or unselected finishes. "
+            f"{mode_directive} "
             f"{surface_scope} "
             "Keep geometry, perspective, framing, and scene elements unchanged. "
             f"{('Zone instructions: ' + zone_text + '. ') if zone_text else ''}"
             f"User direction: {base_prompt}. {realism_suffix} {realism_guardrail}"
         )
 
-        configured_material_model = str(settings.replicate_material_model or "").strip()
-        candidate_models: list[str] = []
-        if configured_material_model:
-            candidate_models.append(configured_material_model)
-        if "google/nano-banana" not in candidate_models:
-            candidate_models.append("google/nano-banana")
-
         output: object | None = None
-        used_model = candidate_models[0]
+        used_model = DEFAULT_MATERIALS_MODEL
         last_error: Exception | None = None
 
         def prepare_input_path(path: str, temp_files: list[str]) -> str:
@@ -655,29 +619,39 @@ class ArchitecturalRenderer:
 
             ref_w, ref_h = self._get_image_size_with_exif(prepared_paths[0])
             aspect_ratio_token = self._closest_aspect_ratio_token(ref_w, ref_h)
-            image_inputs = [Path(path) for path in prepared_paths]
             capture_suffix = Path(prepared_paths[0]).suffix.lower()
             output_format = "png" if capture_suffix == ".png" else "jpg"
 
-            nano_payload = {
-                "prompt": (
-                    f"{material_prompt} Keep exactly the same framing and scene coverage as reference image 1. "
-                    "Do not crop, do not zoom, and do not remove scene elements from reference image 1."
-                ),
-                "image_input": image_inputs,
-                "aspect_ratio": aspect_ratio_token,
-                "output_format": output_format,
-            }
-            if seed is not None:
-                nano_payload["seed"] = int(seed)
+            with ExitStack() as stack:
+                opened_inputs = [stack.enter_context(open(path, "rb")) for path in prepared_paths]
 
-            for model_id in candidate_models:
-                try:
-                    output = self._run_replicate(replicate, model_id, nano_payload)
-                    used_model = model_id
-                    break
-                except Exception as exc:
-                    last_error = exc
+                base_payload = {
+                    "prompt": (
+                        f"{material_prompt} Keep exactly the same framing and scene coverage as reference image 1. "
+                        "Do not crop, do not zoom, and do not remove scene elements from reference image 1."
+                    ),
+                    "aspect_ratio": aspect_ratio_token,
+                    "output_format": output_format,
+                }
+                if seed is not None:
+                    base_payload["seed"] = int(seed)
+
+                payload_attempts = [
+                    {**base_payload, "image_input": opened_inputs},
+                    {**base_payload, "input_image": opened_inputs},
+                    {**base_payload, "image_input": opened_inputs[0]},
+                    {**base_payload, "input_image": opened_inputs[0]},
+                ]
+
+                for payload in payload_attempts:
+                    try:
+                        for handle in opened_inputs:
+                            handle.seek(0)
+                        output = self._run_replicate(replicate, DEFAULT_MATERIALS_MODEL, payload)
+                        used_model = DEFAULT_MATERIALS_MODEL
+                        break
+                    except Exception as exc:
+                        last_error = exc
 
             if output is None:
                 raise RuntimeError(f"El modelo de materiales no devolvio salida: {last_error}")
@@ -716,7 +690,7 @@ class ArchitecturalRenderer:
                     "cartoon, cgi, viewport, flat shading, color cast, wrong material colors, "
                     "unselected materials, blurry, distorted geometry"
                 ),
-                steps=28 if quality == "fast" else 34 if quality == "balanced" else 46,
+                steps=20 if quality == "fast" else 24 if quality == "balanced" else 32,
                 guidance_scale=6.2 if quality != "ultra" else 6.8,
                 quality="balanced" if quality == "fast" else quality,
                 seed=seed,
@@ -728,10 +702,6 @@ class ArchitecturalRenderer:
                 Path(refined_output_path).unlink(missing_ok=True)
             except Exception:
                 pass
-
-        self._enforce_reference_aspect_ratio(input_image_path, output_image_path)
-        self._photoreal_materials_polish(output_image_path, input_image_path)
-        self._normalize_to_full_hd(input_image_path, output_image_path)
 
         duration = int(perf_counter() - started)
         return {
@@ -822,6 +792,7 @@ class ArchitecturalRenderer:
         guidance_scale: float,
         quality: str = "balanced",
         seed: Optional[int] = None,
+        model_override: Optional[str] = None,
     ) -> dict[str, int | str]:
         provider = settings.render_provider.lower().strip()
         if provider == "replicate":
@@ -835,6 +806,7 @@ class ArchitecturalRenderer:
                     guidance_scale=guidance_scale,
                     quality=quality,
                     seed=seed,
+                    model_override=model_override,
                 )
             except Exception as exc:
                 if not settings.fallback_to_local_on_cloud_error:
@@ -897,6 +869,7 @@ class ArchitecturalRenderer:
         prompt: str,
         material_mode: str,
         material_plan: str,
+        material_names: Optional[list[str]] = None,
         quality: str = "balanced",
         seed: Optional[int] = None,
     ) -> dict[str, int | str]:
@@ -911,6 +884,7 @@ class ArchitecturalRenderer:
             prompt=prompt,
             material_mode=material_mode,
             material_plan=material_plan,
+            material_names=material_names,
             quality=quality,
             seed=seed,
         )

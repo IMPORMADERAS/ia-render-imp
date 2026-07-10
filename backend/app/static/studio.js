@@ -195,6 +195,7 @@ let materialItems = [];
 const selectedMaterialNames = [];
 let materialSearchQuery = "";
 let currentMode = "img2img";
+let activeRenderJobId = null;
 let authMode = "login";
 let currentUser = null;
 const wompiWatchingRefs = new Set();
@@ -2260,6 +2261,11 @@ async function pollJob(jobId) {
   stopPolling();
 
   pollingTimer = setInterval(async () => {
+    if (!activeRenderJobId || activeRenderJobId !== jobId) {
+      stopPolling();
+      return;
+    }
+
     try {
       const response = await fetch(`/jobs/${jobId}`);
       if (!response.ok) {
@@ -2273,6 +2279,9 @@ async function pollJob(jobId) {
 
       if (job.status === "completed") {
         stopPolling();
+        if (!activeRenderJobId || activeRenderJobId !== jobId) {
+          return;
+        }
         const imageUrl = `/jobs/${jobId}/image`;
         showImageElement(outputPreview, `${imageUrl}?t=${Date.now()}`);
         downloadLink.href = imageUrl;
@@ -2298,6 +2307,9 @@ async function pollJob(jobId) {
         textSubmitBtn.disabled = false;
       } else if (job.status === "failed") {
         stopPolling();
+        if (!activeRenderJobId || activeRenderJobId !== jobId) {
+          return;
+        }
         setStatus(`Fallo: ${job.error || "error desconocido"}`, "failed");
         submitBtn.disabled = false;
         textSubmitBtn.disabled = false;
@@ -2316,6 +2328,7 @@ async function pollJob(jobId) {
 async function createRender(endpoint, payload, inputPreviewUrl) {
   downloadLink.classList.add("disabled");
   hideImageElement(outputPreview);
+  activeRenderJobId = null;
 
   if (inputPreviewUrl) {
     showImageElement(inputPreview, inputPreviewUrl);
@@ -2336,6 +2349,7 @@ async function createRender(endpoint, payload, inputPreviewUrl) {
   }
 
   const data = await response.json();
+  activeRenderJobId = data.job_id;
   setStatus("Job en cola...", "processing");
   stageEl.textContent = "Etapa: en cola";
   progressFill.style.width = "8%";

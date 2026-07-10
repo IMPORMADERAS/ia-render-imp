@@ -66,6 +66,17 @@ def _resolve_material_paths(material_names: list[str]) -> list[str]:
     return resolved
 
 
+def _normalize_material_names(raw_names: list[str]) -> list[str]:
+    normalized: list[str] = []
+    for raw in raw_names:
+        candidate = str(raw or "").replace("\r", "\n")
+        chunks = [part.strip() for part in candidate.replace(",", "\n").split("\n")]
+        for chunk in chunks:
+            if chunk:
+                normalized.append(chunk)
+    return normalized
+
+
 @router.post("/render", response_model=dict)
 async def create_render_job(
     background_tasks: BackgroundTasks,
@@ -178,6 +189,7 @@ async def create_render_job(
                 guidance_scale=guidance_scale,
                 quality=quality,
                 seed=seed,
+                model_override="black-forest-labs/flux-kontext-pro",
             )
 
             duration = int(render_meta.get("duration_seconds", 1))
@@ -384,7 +396,9 @@ async def create_material_render_job(
     if not prompt.strip():
         raise HTTPException(status_code=400, detail="El prompt es obligatorio")
 
-    if len(material_names) < 1 or len(material_names) > 2:
+    normalized_material_names = _normalize_material_names(material_names)
+
+    if len(normalized_material_names) < 1 or len(normalized_material_names) > 2:
         raise HTTPException(status_code=400, detail="Selecciona entre 1 y 2 materiales")
 
     safe_mode = (material_mode or "mix").strip().lower()
@@ -393,7 +407,7 @@ async def create_material_render_job(
 
     safe_lighting_mode = normalize_lighting_mode(lighting_mode)
 
-    resolved_material_paths = _resolve_material_paths(material_names)
+    resolved_material_paths = _resolve_material_paths(normalized_material_names)
 
     job_id = str(uuid4())
     sequence = get_next_sequence()
@@ -431,7 +445,7 @@ async def create_material_render_job(
             "quality": quality,
             "input_image": str(input_path),
             "output_image": None,
-            "material_names": material_names,
+            "material_names": normalized_material_names,
             "material_mode": safe_mode,
             "material_plan": material_plan,
             "error": None,
@@ -488,7 +502,7 @@ async def create_material_render_job(
                 job_id,
                 {
                     "progress": 55,
-                    "stage": f"Aplicando {len(material_names)} materiales ({safe_mode})",
+                    "stage": f"Aplicando {len(normalized_material_names)} materiales ({safe_mode})",
                     "updated_at": utc_now_iso(),
                 },
             )
@@ -500,6 +514,7 @@ async def create_material_render_job(
                 prompt=full_prompt,
                 material_mode=safe_mode,
                 material_plan=material_plan,
+                material_names=normalized_material_names,
                 quality=quality,
                 seed=seed,
             )
