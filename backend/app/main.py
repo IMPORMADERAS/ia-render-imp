@@ -62,6 +62,11 @@ def documentation_page() -> FileResponse:
     return FileResponse(path=static_dir / "documentation.html")
 
 
+@app.get("/que-es-iaimp", include_in_schema=False)
+def what_is_iaimp_page() -> FileResponse:
+    return FileResponse(path=static_dir / "que-es-iaimp.html")
+
+
 @app.get("/terminos-y-condiciones", include_in_schema=False)
 def terms_page() -> FileResponse:
     return FileResponse(path=static_dir / "terms.html")
