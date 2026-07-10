@@ -426,20 +426,6 @@ function getImageToVideoEngines() {
       badge: "Economico",
       badgeClass: "economy",
     },
-    {
-      id: "wan-video/wan-2.5-i2v-fast",
-      engine: "Wan 2.5 I2V Fast",
-      usdPerSecond: Number(engines["wan-video/wan-2.5-i2v-fast"] ?? DEFAULT_PRICING.video_engine_usd_per_second["wan-video/wan-2.5-i2v-fast"]),
-      badge: "Balanceado",
-      badgeClass: "balanced",
-    },
-    {
-      id: "minimax/video-01-live",
-      engine: "Minimax Video-01 Live",
-      usdPerSecond: Number(engines["minimax/video-01-live"] ?? DEFAULT_PRICING.video_engine_usd_per_second["minimax/video-01-live"]),
-      badge: "Calidad",
-      badgeClass: "quality",
-    },
   ];
 }
 
@@ -1332,9 +1318,9 @@ function calculateRechargeCosts(amountCop) {
 function getCapacityScenarios() {
   return [
     { engineId: "wan-video/wan-2.2-i2v-fast", seconds: 5, label: "Wan 2.2 I2V Fast · Más económico · 5 segundos" },
-    { engineId: "wan-video/wan-2.2-i2v-fast", seconds: 8, label: "Wan 2.2 I2V Fast · Más económico · 8 segundos" },
-    { engineId: "wan-video/wan-2.2-i2v-fast", seconds: 15, label: "Wan 2.2 I2V Fast · Más económico · 15 segundos" },
-    { engineId: "wan-video/wan-2.5-i2v-fast", seconds: 5, label: "Wan 2.5 I2V Fast · Balanceado · 5 segundos" },
+    { engineId: "kwaivgi/kling-v3-video", seconds: 5, label: "Kling V3 Cinematic · Premium · 5 segundos" },
+    { engineId: "kwaivgi/kling-v3-video", seconds: 8, label: "Kling V3 Cinematic · Premium · 8 segundos" },
+    { engineId: "kwaivgi/kling-v3-video", seconds: 15, label: "Kling V3 Cinematic · Premium · 15 segundos" },
   ].map((item) => {
     const perSecond = Number(
       pricingConfig?.video_engine_usd_per_second?.[item.engineId]
@@ -1424,7 +1410,8 @@ function renderPricesModal() {
 
   pricesVideoBody.innerHTML = "";
   for (const engine of getImageToVideoEngines()) {
-    for (const seconds of imageToVideoDurations) {
+    const durations = engine.id === "wan-video/wan-2.2-i2v-fast" ? [5] : imageToVideoDurations;
+    for (const seconds of durations) {
       const usdBase = engine.usdPerSecond * seconds;
       const row = document.createElement("tr");
       const badge = `<span class="price-badge price-badge--${engine.badgeClass}">${engine.badge}</span>`;
@@ -2569,6 +2556,10 @@ animBtn.addEventListener("click", async () => {
   animStageEl.textContent = "Etapa: enviando";
 
   const fd = new FormData();
+  const selectedAnimModel = animModelEl.value;
+  const selectedDuration = selectedAnimModel === "wan-video/wan-2.2-i2v-fast"
+    ? "5"
+    : (animDurationEl.value || "5");
   if (hasAnimInputFile) {
     fd.append("file", animDropZoneInput.files[0]);
   } else {
@@ -2578,8 +2569,8 @@ animBtn.addEventListener("click", async () => {
     "prompt",
     animPromptEl.value.trim() || "Camera slowly pans across the facade, gentle breeze in vegetation, cinematic sunset lighting"
   );
-  fd.append("model", animModelEl.value);
-  fd.append("duration_seconds", animDurationEl.value || "5");
+  fd.append("model", selectedAnimModel);
+  fd.append("duration_seconds", selectedDuration);
 
   try {
     const resp = await fetch("/animate", { method: "POST", body: fd });
@@ -2598,6 +2589,22 @@ animBtn.addEventListener("click", async () => {
     animBtn.disabled = false;
   }
 });
+
+function syncAnimDurationOptions() {
+  if (!animModelEl || !animDurationEl) return;
+  const isWan22 = animModelEl.value === "wan-video/wan-2.2-i2v-fast";
+  for (const option of Array.from(animDurationEl.options)) {
+    const isFiveSeconds = option.value === "5";
+    option.hidden = isWan22 && !isFiveSeconds;
+    option.disabled = isWan22 && !isFiveSeconds;
+  }
+  if (isWan22) {
+    animDurationEl.value = "5";
+  }
+}
+
+animModelEl?.addEventListener("change", syncAnimDurationOptions);
+syncAnimDurationOptions();
 
 function stopMusicPolling() {
   if (musicPollingTimer) {
