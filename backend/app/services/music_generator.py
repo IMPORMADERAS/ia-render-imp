@@ -18,20 +18,21 @@ class MusicGenerator:
         language: str,
         theme: str,
         custom_lyrics: str,
+        duration_seconds: int,
     ) -> str:
         genre_text = genre.strip() or "cinematic electronic"
         mood_text = mood.strip() or "emotional and modern"
         instr_text = instruments.strip() or "synth bass, pads, drums"
         taste_text = user_taste.strip() or "clean production, contemporary mix"
         bpm_text = f"~{bpm} BPM" if bpm else "moderate tempo"
-
         if mode == "instrumental":
             return (
-                f"Create an instrumental track. Genre: {genre_text}. Mood: {mood_text}. "
+                f"Create a powerful, catchy, professionally produced instrumental track. Genre: {genre_text}. Mood: {mood_text}. "
                 f"Instruments: {instr_text}. Tempo: {bpm_text}. "
                 f"User taste references: {taste_text}. "
                 "No vocals, no lyrics, no spoken voice. "
-                "Polished mix, clear stereo image, dynamic arrangement."
+                "Deliver a strong hook, memorable motifs, impactful transitions, energetic arrangement growth, polished mix, deep low-end, crisp drums, wide stereo image, commercial loudness, and professional mastering feel. "
+                "Sound authentic to the requested genre, not generic background music."
             )
 
         song_theme = theme.strip() or "personal growth and resilience"
@@ -43,22 +44,25 @@ class MusicGenerator:
         )
 
         return (
-            f"Create a full song in {language.upper()} inspired by modern AI songwriting apps like Suno style. "
+            f"Create a full song in {language.upper()} with a powerful commercial hook and memorable chorus. "
             f"Genre: {genre_text}. Mood: {mood_text}. Instruments: {instr_text}. Tempo: {bpm_text}. "
             f"Theme: {song_theme}. User taste references: {taste_text}. "
             f"{lyrics_instruction} "
-            "Add intro, verse, chorus, bridge, and final chorus energy. Keep it radio-friendly and emotionally engaging."
+            "Build an emotionally engaging structure with intro, verse, pre-chorus, chorus, verse 2, bridge, final chorus, and strong ending when duration allows. "
+            "Make it radio-friendly, punchy, hook-driven, modern, professionally arranged, and polished in mix and dynamics."
         )
 
     @staticmethod
-    def _compose_song_lyrics(language: str, theme: str, custom_lyrics: str) -> str:
+    def _compose_song_lyrics(language: str, theme: str, custom_lyrics: str, duration_seconds: int) -> str:
         custom = custom_lyrics.strip()
         if custom:
             return custom
 
+        long_form = max(8, min(180, int(duration_seconds))) > 45
+
         if (language or "es").strip().lower().startswith("en"):
             topic = theme.strip() or "personal growth"
-            return (
+            short_template = (
                 "[Verse]\n"
                 f"I was down but now I rise, chasing brighter skies about {topic}\n"
                 "Every scar became a map, every fear a door\n\n"
@@ -68,13 +72,45 @@ class MusicGenerator:
                 "This is my time, this is my fire\n"
                 "I keep moving higher\n"
             )
+            if not long_form:
+                return short_template
+            return (
+                short_template
+                + "\n[Verse 2]\n"
+                "The night was loud but I learned how to breathe\n"
+                "Now the weight that held me down is fuel beneath my feet\n\n"
+                "[Bridge]\n"
+                "No looking back, no fading out\n"
+                "I found my voice inside the doubt\n\n"
+                "[Final Chorus]\n"
+                "I keep moving, I keep shining through the storm\n"
+                "Every broken part became a brighter form\n"
+                "This is my time, this is my fire\n"
+                "I keep moving higher\n"
+            )
 
         topic = theme.strip() or "superacion personal"
-        return (
+        short_template = (
             "[Verso]\n"
             f"Caigo y me levanto, voy buscando luz, hablando de {topic}\n"
             "Cada herida fue camino, cada noche me enseno\n\n"
             "[Coro]\n"
+            "Sigo adelante, no me apaga el temporal\n"
+            "Con mis cicatrices vuelvo a despegar\n"
+            "Hoy es mi momento, hoy vuelve a brillar\n"
+            "Mi fuerza interior\n"
+        )
+        if not long_form:
+            return short_template
+        return (
+            short_template
+            + "\n[Verso 2]\n"
+            "De las sombras hice impulso, del silencio una cancion\n"
+            "Lo que ayer me daba miedo hoy impulsa el corazon\n\n"
+            "[Puente]\n"
+            "Ya no vuelvo atras, ya no pierdo mi verdad\n"
+            "Todo lo que fui me empuja a despegar\n\n"
+            "[Coro Final]\n"
             "Sigo adelante, no me apaga el temporal\n"
             "Con mis cicatrices vuelvo a despegar\n"
             "Hoy es mi momento, hoy vuelve a brillar\n"
@@ -156,7 +192,12 @@ class MusicGenerator:
                 payload["is_instrumental"] = True
             else:
                 payload["is_instrumental"] = False
-                lyrics = self._compose_song_lyrics(language=language, theme=theme, custom_lyrics=custom_lyrics)
+                lyrics = self._compose_song_lyrics(
+                    language=language,
+                    theme=theme,
+                    custom_lyrics=custom_lyrics,
+                    duration_seconds=safe_duration,
+                )
                 payload["lyrics"] = lyrics
                 if not custom_lyrics.strip():
                     payload["lyrics_optimizer"] = True
@@ -212,9 +253,10 @@ class MusicGenerator:
             language=language,
             theme=theme,
             custom_lyrics=custom_lyrics,
+            duration_seconds=duration_seconds,
         )
 
-        safe_duration = max(8, min(30, int(duration_seconds)))
+        safe_duration = max(8, min(180, int(duration_seconds)))
         primary_model = (
             settings.replicate_song_model.strip()
             if safe_mode == "song"

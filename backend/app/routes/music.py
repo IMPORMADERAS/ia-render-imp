@@ -28,7 +28,7 @@ async def generate_music(
     mood: str = Form(default="uplifting and emotional"),
     instruments: str = Form(default="synths, drums, bass"),
     user_taste: str = Form(default="modern production, clear mix"),
-    duration_seconds: int = Form(default=15),
+    duration_seconds: int = Form(default=180),
     bpm: int | None = Form(default=None),
     language: str = Form(default="es"),
     theme: str = Form(default="resiliencia y crecimiento"),
@@ -40,7 +40,7 @@ async def generate_music(
     if safe_mode not in {"instrumental", "song"}:
         raise HTTPException(status_code=400, detail="mode debe ser 'instrumental' o 'song'")
 
-    safe_duration = max(8, min(30, int(duration_seconds)))
+    safe_duration = max(8, min(180, int(duration_seconds)))
     music_id = str(uuid4())
 
     billed_amount = module_cost_music_cop(safe_duration)
@@ -87,7 +87,7 @@ async def generate_music(
                 music_id,
                 {
                     "status": "processing",
-                    "stage": "Generando audio en Replicate",
+                    "stage": "Generando audio",
                     "progress": 20,
                     "started_at": _utc(),
                     "updated_at": _utc(),

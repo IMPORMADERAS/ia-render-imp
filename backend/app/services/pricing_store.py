@@ -31,6 +31,9 @@ DEFAULT_PRICING: dict[str, Any] = {
         "8": 0.08,
         "15": 0.15,
         "30": 0.3,
+        "60": 0.6,
+        "120": 1.2,
+        "180": 1.8,
     },
     "music_duration_cop": {},
     "video_engine_usd_per_second": {

@@ -23,6 +23,9 @@ const priceChatImage = document.getElementById("price-chat-image");
 const priceMusic8 = document.getElementById("price-music-8");
 const priceMusic15 = document.getElementById("price-music-15");
 const priceMusic30 = document.getElementById("price-music-30");
+const priceMusic60 = document.getElementById("price-music-60");
+const priceMusic120 = document.getElementById("price-music-120");
+const priceMusic180 = document.getElementById("price-music-180");
 const priceI2vKling5 = document.getElementById("price-i2v-kling-5");
 const priceI2vKling8 = document.getElementById("price-i2v-kling-8");
 const priceI2vKling15 = document.getElementById("price-i2v-kling-15");
@@ -180,6 +183,9 @@ function fillCopPricingForm(pricing) {
   setInputValue(priceMusic8, musicCop["8"] ?? toCop(musicUsd["8"]));
   setInputValue(priceMusic15, musicCop["15"] ?? toCop(musicUsd["15"]));
   setInputValue(priceMusic30, musicCop["30"] ?? toCop(musicUsd["30"]));
+  setInputValue(priceMusic60, musicCop["60"] ?? toCop(musicUsd["60"]));
+  setInputValue(priceMusic120, musicCop["120"] ?? toCop(musicUsd["120"]));
+  setInputValue(priceMusic180, musicCop["180"] ?? toCop(musicUsd["180"]));
 
   setInputValue(priceI2vKling5, videoCop["kwaivgi/kling-v3-video"]?.["5"] ?? toCop(safeNumber(videoUsd["kwaivgi/kling-v3-video"]) * 5));
   setInputValue(priceI2vKling8, videoCop["kwaivgi/kling-v3-video"]?.["8"] ?? toCop(safeNumber(videoUsd["kwaivgi/kling-v3-video"]) * 8));
@@ -224,11 +230,17 @@ function buildPricingFromCopForm() {
     "8": parseCopInput(priceMusic8),
     "15": parseCopInput(priceMusic15),
     "30": parseCopInput(priceMusic30),
+    "60": parseCopInput(priceMusic60),
+    "120": parseCopInput(priceMusic120),
+    "180": parseCopInput(priceMusic180),
   };
   base.music_duration_cop = musicCop;
   base.music_duration_usd["8"] = copToUsd(musicCop["8"], base);
   base.music_duration_usd["15"] = copToUsd(musicCop["15"], base);
   base.music_duration_usd["30"] = copToUsd(musicCop["30"], base);
+  base.music_duration_usd["60"] = copToUsd(musicCop["60"], base);
+  base.music_duration_usd["120"] = copToUsd(musicCop["120"], base);
+  base.music_duration_usd["180"] = copToUsd(musicCop["180"], base);
 
   const videoCop = {
     "kwaivgi/kling-v3-video": {

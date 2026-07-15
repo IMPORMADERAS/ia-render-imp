@@ -21,14 +21,21 @@ def _module_usd(key: str, fallback: float) -> float:
 def _music_usd(duration_seconds: int) -> float:
     pricing = _pricing()
     durations = pricing.get("music_duration_usd", {})
-    seconds = str(max(8, min(30, int(duration_seconds))))
+    requested = max(8, min(180, int(duration_seconds)))
+    seconds = str(requested)
     if seconds in durations:
         return float(durations[seconds])
     if int(seconds) <= 8:
         return 0.08
     if int(seconds) <= 15:
         return 0.15
-    return 0.3
+    if int(seconds) <= 30:
+        return 0.3
+    if int(seconds) <= 60:
+        return 0.6
+    if int(seconds) <= 120:
+        return 1.2
+    return 1.8
 
 
 def _video_usd_per_second(model: str) -> float:
@@ -106,7 +113,7 @@ def module_cost_influencer_cop() -> int:
 def module_cost_music_cop(duration_seconds: int) -> int:
     pricing = _pricing()
     music_prices = pricing.get("music_duration_cop", {})
-    seconds = str(max(8, min(30, int(duration_seconds))))
+    seconds = str(max(8, min(180, int(duration_seconds))))
     if seconds in music_prices:
         return _to_int_cop(music_prices.get(seconds))
     return to_psychological_cop(usd_to_cop_with_margin(_music_usd(duration_seconds)))

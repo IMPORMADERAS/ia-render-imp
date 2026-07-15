@@ -115,7 +115,7 @@ async def start_animation(
                 anim_id,
                 {
                     "status": "processing",
-                    "stage": "Generando video en Replicate",
+                    "stage": "Generando video",
                     "progress": 15,
                     "started_at": _utc(),
                     "updated_at": _utc(),

@@ -224,7 +224,7 @@ const DEFAULT_PRICING = {
     chat: 0.01,
   },
   module_price_cop: {},
-  music_duration_usd: { 8: 0.08, 15: 0.15, 30: 0.3 },
+  music_duration_usd: { 8: 0.08, 15: 0.15, 30: 0.3, 60: 0.6, 120: 1.2, 180: 1.8 },
   music_duration_cop: {},
   video_engine_usd_per_second: {
     "kwaivgi/kling-v3-video": 0.224,
@@ -236,6 +236,90 @@ const DEFAULT_PRICING = {
 };
 
 let pricingConfig = JSON.parse(JSON.stringify(DEFAULT_PRICING));
+
+const MUSIC_GENRE_PRESETS = {
+  salsa_choke_calena: {
+    genre: "Salsa choke caleña comercial",
+    mood: "energetico, bailable, callejero y pegajoso",
+    bpm: "102",
+    instruments: "timbal, congas, brass hits, bass groove, percusion urbana, synth support",
+    taste: "hook fuerte, sonido de feria y discoteca, mezcla comercial, coros memorables",
+    theme: "fiesta, barrio, actitud y celebracion",
+    language: "es",
+  },
+  electronica: {
+    genre: "Electronica comercial festivalera",
+    mood: "epica, energica, envolvente y moderna",
+    bpm: "128",
+    instruments: "synth leads, bassline potente, drums punchy, risers, pads atmosfericos",
+    taste: "drop contundente, build-up potente, mezcla premium, impacto club y streaming",
+    theme: "noche, energia, movimiento y euforia",
+    language: "en",
+  },
+  afrobeat: {
+    genre: "Afrobeat comercial moderno",
+    mood: "calido, sensual, veraniego y pegajoso",
+    bpm: "105",
+    instruments: "afro percussion, guitar plucks, deep bass, soft synths, vocal chops",
+    taste: "groove internacional, coros faciles de recordar, mezcla limpia, sonido premium",
+    theme: "verano, fiesta, baile y carisma",
+    language: "es",
+  },
+  reggaeton: {
+    genre: "Regaeton comercial mainstream",
+    mood: "agresivo, sensual, urbano y adictivo",
+    bpm: "94",
+    instruments: "dembow drums, sub bass, synth leads, fx urbanos, pads oscuros",
+    taste: "hook viral, beat potente, mezcla radial, pegada comercial y energia urbana",
+    theme: "fiesta, deseo, seguridad y calle",
+    language: "es",
+  },
+  house: {
+    genre: "House comercial elegante",
+    mood: "uplifting, sofisticado, vibrante y elegante",
+    bpm: "124",
+    instruments: "four-on-the-floor kick, piano house, bass groove, vocal chops, pads",
+    taste: "club premium, groove constante, mezcla amplia, feel internacional",
+    theme: "lujo, noche, estilo y movimiento",
+    language: "en",
+  },
+  rap_rock: {
+    genre: "Rap Rock comercial",
+    mood: "intenso, rebelde, poderoso y motivador",
+    bpm: "96",
+    instruments: "electric guitars, live drums, bass, turntable fx, aggressive synth support",
+    taste: "riff memorable, coro fuerte, energia de estadio, mezcla potente y moderna",
+    theme: "superacion, fuerza, identidad y resistencia",
+    language: "es",
+  },
+  new_metal: {
+    genre: "New Metal moderno",
+    mood: "oscuro, agresivo, emocional y explosivo",
+    bpm: "92",
+    instruments: "heavy guitars, distorted bass, hard drums, atmospheric textures, fx industriales",
+    taste: "coro masivo, breakdown potente, mezcla grande, energia extrema y moderna",
+    theme: "catarsis, lucha interna, rabia y poder",
+    language: "en",
+  },
+  balada_pop: {
+    genre: "Balada pop comercial",
+    mood: "emocional, romantica, inspiradora y memorable",
+    bpm: "78",
+    instruments: "piano, acoustic guitar, strings, soft drums, ambient pads",
+    taste: "melodia fuerte, coro inolvidable, produccion limpia, radio-friendly y emocional",
+    theme: "amor, nostalgia, esperanza y crecimiento",
+    language: "es",
+  },
+  pop_urbano_comercial: {
+    genre: "Pop urbano comercial",
+    mood: "fresh, juvenil, pegajoso y aspiracional",
+    bpm: "100",
+    instruments: "urban drums, synth bass, plucks, ambient pads, melodic lead",
+    taste: "hook viral, mezcla premium, sonido global, energia comercial y moderna",
+    theme: "amor propio, deseo, fiesta y lifestyle",
+    language: "es",
+  },
+};
 
 function applyPricingConfig(rawConfig) {
   const incoming = rawConfig && typeof rawConfig === "object" ? rawConfig : {};
@@ -414,14 +498,14 @@ function getImageToVideoEngines() {
   return [
     {
       id: "kwaivgi/kling-v3-video",
-      engine: "Kling V3 Pro",
+      engine: "Cinematic Pro",
       usdPerSecond: Number(engines["kwaivgi/kling-v3-video"] ?? DEFAULT_PRICING.video_engine_usd_per_second["kwaivgi/kling-v3-video"]),
       badge: "Premium",
       badgeClass: "premium",
     },
     {
       id: "wan-video/wan-2.2-i2v-fast",
-      engine: "Wan 2.2 I2V Fast",
+      engine: "Video Economico",
       usdPerSecond: Number(engines["wan-video/wan-2.2-i2v-fast"] ?? DEFAULT_PRICING.video_engine_usd_per_second["wan-video/wan-2.2-i2v-fast"]),
       badge: "Economico",
       badgeClass: "economy",
@@ -432,9 +516,7 @@ function getImageToVideoEngines() {
 function getMusicDurationPricing() {
   const durations = pricingConfig?.music_duration_usd || {};
   return [
-    { seconds: 8, usdBase: Number(durations[8] ?? durations["8"] ?? DEFAULT_PRICING.music_duration_usd[8]) },
-    { seconds: 15, usdBase: Number(durations[15] ?? durations["15"] ?? DEFAULT_PRICING.music_duration_usd[15]) },
-    { seconds: 30, usdBase: Number(durations[30] ?? durations["30"] ?? DEFAULT_PRICING.music_duration_usd[30]) },
+    { seconds: 180, usdBase: Number(durations[180] ?? durations["180"] ?? DEFAULT_PRICING.music_duration_usd[180]), label: "Automatico actual", featured: true },
   ];
 }
 
@@ -1430,35 +1512,19 @@ function renderPricesModal() {
     for (const item of getMusicDurationPricing()) {
       const row = document.createElement("tr");
       const musicCop = getMusicCopPrice(item.seconds, item.usdBase);
+      const badge = item.featured
+        ? ' <span class="price-badge price-badge--premium">Actual</span>'
+        : "";
       row.innerHTML = `
-        <td>${item.seconds} segundos</td>
+        <td>${item.label} · ${item.seconds} segundos${badge}</td>
         <td>${formatCop(musicCop)}</td>
       `;
       pricesMusicBody.appendChild(row);
     }
   }
 
-  if (pricesRechargeBody) {
-    pricesRechargeBody.innerHTML = "";
-    for (const amount of getRechargePlans()) {
-      const lines = buildCapacityTextForAmount(amount)
-        .slice(0, 2)
-        .map((line) => line.replace(" gen aprox.", "x"))
-        .join(" · ");
-      const row = document.createElement("tr");
-      row.innerHTML = `
-        <td>${formatCop(amount)}</td>
-        <td>${formatCop(amount)}</td>
-        <td>${lines}</td>
-      `;
-      pricesRechargeBody.appendChild(row);
-    }
-  }
-
-  renderPlanBanners();
-
   if (pricesNote) {
-    pricesNote.textContent = "Valores por generación en COP";
+    pricesNote.textContent = "Valores por generación en COP. Música IA comercial usa actualmente el tramo automático extendido de 180 segundos.";
   }
 }
 
@@ -2480,6 +2546,8 @@ async function pollAnimation(animId) {
 
       const anim = await resp.json();
       const backendProgress = Number(anim.progress || 0);
+      const rawStage = String(anim.stage || "procesando");
+      const normalizedAnimStage = rawStage.replace(/\s+en\s+replicate$/i, "");
 
       if (anim.status === "processing" || anim.status === "queued") {
         const step = anim.status === "queued" ? 2 : 4;
@@ -2490,7 +2558,7 @@ async function pollAnimation(animId) {
 
       animProgressFill.style.width = `${animVisualProgress}%`;
       animProgressText.textContent = `${animVisualProgress}%`;
-      animStageEl.textContent = `Etapa: ${anim.stage || "procesando"}`;
+  animStageEl.textContent = `Etapa: ${normalizedAnimStage}`;
 
       if (anim.status === "completed") {
         stopAnimPolling();
@@ -2685,6 +2753,21 @@ musicTypeEl.addEventListener("change", () => {
     : "Opcional: normalmente vacio para instrumental";
 });
 
+function applyMusicGenrePreset() {
+  if (!musicGenreEl) return;
+  const preset = MUSIC_GENRE_PRESETS[musicGenreEl.value];
+  if (!preset) return;
+  if (musicMoodEl) musicMoodEl.value = preset.mood;
+  if (musicBpmEl) musicBpmEl.value = preset.bpm;
+  if (musicInstrumentsEl) musicInstrumentsEl.value = preset.instruments;
+  if (musicTasteEl) musicTasteEl.value = preset.taste;
+  if (musicThemeEl) musicThemeEl.value = preset.theme;
+  if (musicLanguageEl && musicTypeEl?.value === "song") musicLanguageEl.value = preset.language;
+}
+
+musicGenreEl?.addEventListener("change", applyMusicGenrePreset);
+applyMusicGenrePreset();
+
 musicForm.addEventListener("submit", async (event) => {
   event.preventDefault();
 
@@ -2707,12 +2790,13 @@ musicForm.addEventListener("submit", async (event) => {
   musicStageEl.textContent = "Etapa: enviando";
 
   const fd = new FormData();
+  const selectedMusicPreset = MUSIC_GENRE_PRESETS[musicGenreEl.value] || null;
   fd.append("mode", musicTypeEl.value);
-  fd.append("genre", musicGenreEl.value.trim() || "cinematic electronic");
+  fd.append("genre", selectedMusicPreset?.genre || musicGenreEl.value || "pop comercial");
   fd.append("mood", musicMoodEl.value.trim() || "uplifting and emotional");
   fd.append("instruments", musicInstrumentsEl.value.trim() || "synth bass, drums, piano");
   fd.append("user_taste", musicTasteEl.value.trim() || "modern production and clean mix");
-  fd.append("duration_seconds", musicDurationEl.value || "15");
+  fd.append("duration_seconds", "180");
   fd.append("language", musicLanguageEl.value || "es");
   fd.append("theme", musicThemeEl.value.trim() || "superacion personal");
   fd.append("custom_lyrics", musicLyricsEl.value.trim());

@@ -217,8 +217,8 @@
               <label class="field field--inline">
                 <span>Modelo de video</span>
                 <select id="anim-model">
-                  <option value="kwaivgi/kling-v3-video" selected>Kling V3 Cinematic (hasta 15s)</option>
-                  <option value="wan-video/wan-2.2-i2v-fast">Wan 2.2 I2V Fast (rapido, economico)</option>
+                  <option value="kwaivgi/kling-v3-video" selected>Cinematic (hasta 15s)</option>
+                  <option value="wan-video/wan-2.2-i2v-fast">Fast (rapido, economico)</option>
                 </select>
               </label>
 
@@ -400,17 +400,23 @@
 
               <label class="field">
                 <span>Duracion</span>
-                <select id="music-duration" name="duration_seconds">
-                  <option value="8">8 segundos</option>
-                  <option value="15" selected>15 segundos</option>
-                  <option value="30">30 segundos</option>
-                </select>
+                <input id="music-duration-label" type="text" value="Automatica segun el motor" readonly />
               </label>
             </div>
 
             <label class="field">
               <span>Genero musical</span>
-              <input id="music-genre" name="genre" type="text" value="pop cinematica" placeholder="Ej: synthwave, house, lofi, reggaeton, cinematic" />
+              <select id="music-genre" name="genre">
+                <option value="salsa_choke_calena" selected>Salsa Choke caleña</option>
+                <option value="electronica">Electronica</option>
+                <option value="afrobeat">Afrobeat</option>
+                <option value="reggaeton">Regaeton</option>
+                <option value="house">House</option>
+                <option value="rap_rock">Rap Rock</option>
+                <option value="new_metal">New Metal</option>
+                <option value="balada_pop">Balada pop</option>
+                <option value="pop_urbano_comercial">Pop urbano comercial</option>
+              </select>
             </label>
 
             <div class="grid-2">
@@ -591,35 +597,18 @@
           </table>
         </div>
 
-        <h4 class="modal__subhead">Musica IA por duración (8s / 15s / 30s)</h4>
+        <h4 class="modal__subhead">Musica IA automatica actual</h4>
         <div class="prices-table-wrap">
           <table class="prices-table">
             <thead>
               <tr>
-                <th>Duración</th>
+                <th>Modo</th>
                 <th>Precio IA-IMP (COP)</th>
               </tr>
             </thead>
             <tbody id="prices-music-body"></tbody>
           </table>
         </div>
-
-        <h4 class="modal__subhead">Planes de recarga</h4>
-        <div class="prices-table-wrap">
-          <table class="prices-table">
-            <thead>
-              <tr>
-                <th>Recarga</th>
-                <th>Valor a pagar</th>
-                <th>Capacidad destacada</th>
-              </tr>
-            </thead>
-            <tbody id="prices-recharge-body"></tbody>
-          </table>
-        </div>
-
-        <h4 class="modal__subhead">Capacidad por plan (aprox.)</h4>
-        <div id="prices-plan-banners" class="plan-banners"></div>
       </section>
     </div>
 
