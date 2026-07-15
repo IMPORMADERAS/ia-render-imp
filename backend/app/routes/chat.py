@@ -12,7 +12,15 @@ from pydantic import BaseModel
 
 from ..config import settings
 from ..services.renderer import renderer
-from ..services.auth_wallet import AuthenticatedUser, InsufficientBalanceError, credit_balance, debit_balance, require_authenticated_user
+from ..services.auth_wallet import (
+    AuthenticatedUser,
+    InsufficientBalanceError,
+    credit_balance,
+    debit_balance,
+    list_user_chat_history,
+    record_chat_history,
+    require_authenticated_user,
+)
 from ..services.billing import module_cost_chat_cop, module_cost_chat_image_cop
 
 router = APIRouter(prefix="/chat", tags=["chat"])
@@ -41,27 +49,8 @@ IMPORMADERAS_DEFINITION_RESPONSE = (
 COUNTRY_CITY_RESPONSE = "Colombia - Exactamente en Cali - Palmira - Dosquebradas y Jamundí"
 
 HEADQUARTERS_RESPONSE = (
-    "Todas nuestras sedes están en Colombia:\n\n"
-    "Cali\n"
-    "SEDE PRINCIPAL - CARRERA 8 # 17 – 55 – 59SAN NICOLAS\n"
-    "SEDE PONDAJE - CALLE 70 # 27 – 129\n"
-    "SEDE CALLE 16 - CALLE 16 # 7- 86CENTRO\n"
-    "ZONA OUTLET - CALLE 18 # 7 – 95CENTRO\n"
-    "SEDE VILLANUEVA - CALLE 34D – TRANSV. 29 – 43\n\n"
-    "Jamundí\n"
-    "SEDE JAMUNDÍ - CRA. 10 No 26 – 100\n\n"
-    "Dosquebradas\n"
-    "SEDE Dosquebradas - CRA. 16# 8 – 102 / Sector la Popa.\n\n"
-    "Palmira\n"
-    "SEDE PALMIRA - Cll 31 # 30-26** **– CERCA AL PARQUE PRINCIPAL\n\n"
-    "Cali\n"
-    "Y No te olvides de nuestra Hermosa fundación\n"
-    "FUNDACIÓN LA CASITA DE EMMANUEL\n"
-    "CALLE 18 No 7 – 59\n"
-    "Donde gracias a sus compras podemos mantener más de 135 niños.\n\n"
-    "Si necesitas un numero de atención mas agil, comunicate a la linea de atención digital:\n"
-    "WhatsApp: 3137399382\n"
-    "Es más te doy el enlace directo, solo dale clic y te llevamos al WhatsApp https://wa.link/n32n25"
+    "Dando clic a este link podras consultar todas nuestras sedes, incluso tendras la ruta con Waze: "
+    "https://tiendaonline.impormaderasltda.com/sedes/"
 )
 
 CONTACT_LINES_RESPONSE = (
@@ -70,12 +59,15 @@ CONTACT_LINES_RESPONSE = (
     "Es más te doy el enlace directo, solo dale clic y te llevamos al WhatsApp https://wa.link/n32n25"
 )
 
+WEBSITE_RESPONSE = "La pagina web oficial de IMPORMADERAS es: https://impormaderasltda.com/"
+
 RECENT_ATTACHMENTS_BY_USER: dict[int, list[dict]] = {}
 
 
 class ChatRequest(BaseModel):
     message: str
     context: str = ""
+    conversation_id: str = ""
 
 
 def _safe_attachment_name(file_name: str) -> str:
@@ -293,8 +285,37 @@ def _get_ia_imp_default_answer(message: str) -> str | None:
     if "en que pais estan" in compact or "en que ciudad estan" in compact:
         return COUNTRY_CITY_RESPONSE
 
-    if "donde estan sus sedes" in compact or ("donde" in compact and "sede" in compact):
+    asks_for_locations = any(
+        phrase in compact
+        for phrase in (
+            "donde estan sus sedes",
+            "donde estan las sedes",
+            "cuales son las sedes",
+            "cuales son sus sedes",
+            "sedes de impormaderas",
+            "ubicacion de las sedes",
+            "ubicaciones de impormaderas",
+        )
+    )
+    mentions_sedes = "sede" in compact or "sedes" in compact
+    mentions_impormaderas = "impormaderas" in compact
+    if asks_for_locations or (mentions_sedes and ("donde" in compact or "cual" in compact or mentions_impormaderas)):
         return HEADQUARTERS_RESPONSE
+
+    asks_for_website = any(
+        phrase in compact
+        for phrase in (
+            "pagina web de impormaderas",
+            "sitio web de impormaderas",
+            "web de impormaderas",
+            "pagina de impormaderas",
+            "cual es la pagina web",
+            "cual es el sitio web",
+            "dominio de impormaderas",
+        )
+    )
+    if asks_for_website:
+        return WEBSITE_RESPONSE
 
     if "lineas de atencion" in compact or "linea de atencion" in compact:
         return CONTACT_LINES_RESPONSE
@@ -717,17 +738,69 @@ def _extract_text(output: object) -> str:
     return str(output).strip()
 
 
+def _serialize_chat_attachments(items: list[dict]) -> list[dict]:
+    safe_items: list[dict] = []
+    for raw in items or []:
+        if not isinstance(raw, dict):
+            continue
+        safe_items.append(
+            {
+                "original_name": str(raw.get("original_name") or ""),
+                "content_type": str(raw.get("content_type") or ""),
+                "size": int(raw.get("size") or 0),
+                "url": str(raw.get("url") or ""),
+            }
+        )
+    return safe_items
+
+
+def _build_chat_response(
+    *,
+    user: AuthenticatedUser,
+    user_message: str,
+    answer: str,
+    model: str,
+    conversation_id: str,
+    attachments: list[dict],
+) -> dict:
+    try:
+        record_chat_history(
+            user_id=user.user_id,
+            conversation_id=conversation_id,
+            user_message=user_message,
+            assistant_message=answer,
+            model=model,
+            attachments=_serialize_chat_attachments(attachments),
+        )
+    except Exception:
+        # History persistence should not block the user-facing chat response.
+        pass
+
+    return {
+        "answer": answer,
+        "model": model,
+        "attachments": attachments,
+    }
+
+
+@router.get("/history", response_model=dict)
+def get_history(user: AuthenticatedUser = Depends(require_authenticated_user)):
+    return {"items": list_user_chat_history(user.user_id, limit=200)}
+
+
 @router.post("/message", response_model=dict)
 async def chat_message(request: Request, user: AuthenticatedUser = Depends(require_authenticated_user)):
     content_type = str(request.headers.get("content-type") or "").lower()
     message = ""
     context = ""
+    conversation_id = ""
     attachments: list[dict] = []
 
     if content_type.startswith("multipart/form-data"):
         form = await request.form()
         message = str(form.get("message") or "").strip()
         context = str(form.get("context") or "")
+        conversation_id = str(form.get("conversation_id") or "").strip()
         files = list(form.getlist("files"))
         attachments = await _save_chat_attachments(files)
     else:
@@ -735,10 +808,15 @@ async def chat_message(request: Request, user: AuthenticatedUser = Depends(requi
         payload = ChatRequest(**payload_raw)
         message = payload.message.strip()
         context = payload.context
+        conversation_id = payload.conversation_id.strip()
+
+    if not conversation_id:
+        conversation_id = f"conv-{uuid4()}"
 
     if attachments:
         _remember_user_attachments(user.user_id, attachments)
     effective_attachments = attachments or _get_user_recent_attachments(user.user_id)
+    persisted_user_message = message.strip() or "Mensaje con adjuntos"
 
     if not message and not effective_attachments:
         raise HTTPException(status_code=400, detail="El mensaje no puede estar vacio")
@@ -768,7 +846,14 @@ async def chat_message(request: Request, user: AuthenticatedUser = Depends(requi
     try:
         default_answer = _get_ia_imp_default_answer(message)
         if default_answer:
-            return {"answer": default_answer, "model": "policy:ia-imp-default", "attachments": effective_attachments}
+            return _build_chat_response(
+                user=user,
+                user_message=persisted_user_message,
+                answer=default_answer,
+                model="policy:ia-imp-default",
+                conversation_id=conversation_id,
+                attachments=effective_attachments,
+            )
 
         if reference_image is not None and (
             _looks_like_image_transform_request(message) or _looks_like_image_request(message)
@@ -794,48 +879,63 @@ async def chat_message(request: Request, user: AuthenticatedUser = Depends(requi
                     quality="balanced",
                     seed=None,
                 )
-            return {
-                "answer": (
+            return _build_chat_response(
+                user=user,
+                user_message=persisted_user_message,
+                answer=(
                     "Listo, usé tu imagen adjunta como referencia para generar el resultado. "
                     f"Descarga aquí: /chat/files/{file_name}"
                 ),
-                "model": used_model,
-                "attachments": effective_attachments,
-            }
+                model=used_model,
+                conversation_id=conversation_id,
+                attachments=effective_attachments,
+            )
 
         if _looks_like_excel_request(message):
             file_name = f"cotizacion-{uuid4()}.xlsx"
             file_path = _safe_export_path(file_name)
             _build_excel_template(file_path)
-            return {
-                "answer": (
+            return _build_chat_response(
+                user=user,
+                user_message=persisted_user_message,
+                answer=(
                     "Listo, generé tu Excel de cotización con fórmulas y formato listo para reemplazar valores. "
                     f"Descarga aquí: /chat/files/{file_name}"
                 ),
-                "model": "tool:excel-template",
-            }
+                model="tool:excel-template",
+                conversation_id=conversation_id,
+                attachments=effective_attachments,
+            )
 
         if _looks_like_word_request(message):
             generated = _build_word_document(message)
-            return {
-                "answer": (
+            return _build_chat_response(
+                user=user,
+                user_message=persisted_user_message,
+                answer=(
                     "Listo, generé tu documento en Word con un borrador editable. "
                     f"Descarga aquí: /chat/files/{generated.name}"
                 ),
-                "model": "tool:word-doc",
-            }
+                model="tool:word-doc",
+                conversation_id=conversation_id,
+                attachments=effective_attachments,
+            )
 
         if _looks_like_image_request(message):
             if not settings.replicate_api_token:
                 raise HTTPException(status_code=500, detail="Falta REPLICATE_API_TOKEN en backend/.env")
             generated = _generate_logo_image(message)
-            return {
-                "answer": (
+            return _build_chat_response(
+                user=user,
+                user_message=persisted_user_message,
+                answer=(
                     "Listo, generé una propuesta visual descargable. "
                     f"Descarga aquí: /chat/files/{generated.name}"
                 ),
-                "model": "tool:image-generator",
-            }
+                model="tool:image-generator",
+                conversation_id=conversation_id,
+                attachments=effective_attachments,
+            )
 
         if not settings.replicate_api_token:
             raise HTTPException(status_code=500, detail="Falta REPLICATE_API_TOKEN en backend/.env")
@@ -914,7 +1014,14 @@ async def chat_message(request: Request, user: AuthenticatedUser = Depends(requi
         if not answer:
             answer = "No pude generar respuesta en este momento."
 
-        return {"answer": answer, "model": used_model, "attachments": effective_attachments}
+        return _build_chat_response(
+            user=user,
+            user_message=persisted_user_message,
+            answer=answer,
+            model=str(used_model or ""),
+            conversation_id=conversation_id,
+            attachments=effective_attachments,
+        )
     except Exception as exc:
         try:
             refund_module = "chat_image_refund" if wants_chat_image else "chat_refund"

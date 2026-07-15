@@ -1122,6 +1122,111 @@ h2 {
   height: 100%;
 }
 
+.chat-head-main {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.chat-history-toggle {
+  margin: 0;
+  padding: 0.32rem 0.68rem;
+  border-radius: 999px;
+  border: 1px solid rgba(31, 200, 108, 0.36);
+  background: rgba(31, 200, 108, 0.12);
+  color: #bbffd9;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.chat-history-toggle[aria-expanded="true"] {
+  background: rgba(31, 200, 108, 0.2);
+  border-color: rgba(31, 200, 108, 0.52);
+}
+
+.chat-history-modal-card {
+  width: min(1120px, 95vw);
+}
+
+.chat-history-modal-grid {
+  display: grid;
+  grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
+  gap: 0.8rem;
+  margin-top: 0.5rem;
+}
+
+.chat-history-sidebar,
+.chat-history-detail {
+  border: 1px solid var(--card-border);
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.32);
+  padding: 0.7rem;
+}
+
+.chat-history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.chat-history-item {
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.03);
+  padding: 0.6rem 0.7rem;
+  cursor: pointer;
+}
+
+.chat-history-item.is-active {
+  border-color: rgba(31, 200, 108, 0.55);
+  background: rgba(31, 200, 108, 0.12);
+}
+
+.chat-history-item p {
+  margin: 0.2rem 0;
+  font-size: 0.86rem;
+  line-height: 1.5;
+}
+
+.chat-history-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  font-size: 0.72rem;
+  color: var(--text-3);
+}
+
+.chat-history-detail-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.chat-history-detail-entry {
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.03);
+  padding: 0.65rem 0.75rem;
+}
+
+.chat-history-detail-entry p {
+  margin: 0.25rem 0;
+  font-size: 0.88rem;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.chat-history-empty {
+  font-size: 0.85rem;
+  color: var(--text-3);
+}
+
 .chat-messages {
   margin-top: 0.6rem;
   border: 1px solid var(--card-border);
@@ -1647,6 +1752,10 @@ h2 {
 
   .chat-messages {
     min-height: 340px;
+  }
+
+  .chat-history-modal-grid {
+    grid-template-columns: 1fr;
   }
 }
 

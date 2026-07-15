@@ -44,6 +44,13 @@ const musicShell = document.getElementById("music-shell");
 const chatShell = document.getElementById("chat-shell");
 const chatMessages = document.getElementById("chat-messages");
 const chatStatus = document.getElementById("chat-status");
+const chatNewConversationBtn = document.getElementById("chat-new-conversation");
+const chatHistoryToggle = document.getElementById("chat-history-toggle");
+const chatHistoryModal = document.getElementById("chat-history-modal");
+const chatHistoryClose = document.getElementById("chat-history-close");
+const chatHistoryList = document.getElementById("chat-history-list");
+const chatHistoryDetail = document.getElementById("chat-history-detail");
+const chatHistoryRefresh = document.getElementById("chat-history-refresh");
 const chatInput = document.getElementById("chat-input");
 const chatAttachBtn = document.getElementById("chat-attach-btn");
 const chatAttachInput = document.getElementById("chat-attach-input");
@@ -179,6 +186,7 @@ const accountPasswordStatus = document.getElementById("account-password-status")
 const accountDeleteBtn = document.getElementById("account-delete-btn");
 const accountDeleteStatus = document.getElementById("account-delete-status");
 const accountGenerationsBody = document.getElementById("account-generations-body");
+const accountChatHistoryBody = document.getElementById("account-chat-history-body");
 
 let pollingTimer = null;
 let currentAnimJobId = null;
@@ -190,6 +198,8 @@ let influencerPollingTimer = null;
 let influencerVisualProgress = 0;
 let wompiSyncTimer = null;
 const chatHistory = [];
+let chatHistoryPanelLoaded = false;
+let activeConversationId = `conv-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 let chatAttachedFiles = [];
 let materialItems = [];
 const selectedMaterialNames = [];
@@ -930,9 +940,49 @@ function formatDate(value) {
   return date.toLocaleString("es-CO");
 }
 
+function cropText(value, maxLength = 220) {
+  const text = String(value || "").trim();
+  if (text.length <= maxLength) return text;
+  return `${text.slice(0, maxLength - 1)}…`;
+}
+
+function escapeHtml(value) {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function renderAccountChatHistory(historyItems) {
+  if (!accountChatHistoryBody) return;
+  const items = Array.isArray(historyItems) ? historyItems : [];
+  accountChatHistoryBody.innerHTML = "";
+
+  if (!items.length) {
+    const row = document.createElement("tr");
+    row.innerHTML = '<td colspan="4">Aun no hay conversaciones de Pachy IA registradas.</td>';
+    accountChatHistoryBody.appendChild(row);
+    return;
+  }
+
+  for (const item of items.slice(0, 120)) {
+    const row = document.createElement("tr");
+    row.innerHTML = `
+      <td>${formatDate(item.created_at)}</td>
+      <td>${escapeHtml(cropText(item.user_message, 200) || "-")}</td>
+      <td>${escapeHtml(cropText(item.assistant_message, 220) || "-")}</td>
+      <td>${escapeHtml(cropText(item.model, 70) || "-")}</td>
+    `;
+    accountChatHistoryBody.appendChild(row);
+  }
+}
+
 function renderAccountSummary(data) {
   const user = data?.user || {};
   const generations = Array.isArray(data?.generations) ? data.generations : [];
+  const chatHistoryItems = Array.isArray(data?.chat_history) ? data.chat_history : [];
   const balance = Number(data?.balance_cop || user.balance_cop || 0);
 
   if (accountFirstName) accountFirstName.value = user.first_name || "";
@@ -984,6 +1034,8 @@ function renderAccountSummary(data) {
       }
     }
   }
+
+  renderAccountChatHistory(chatHistoryItems);
 }
 
 async function openAccountModal() {
@@ -1162,6 +1214,8 @@ async function refreshCurrentUser() {
     const resp = await fetch("/auth/me");
     if (!resp.ok) {
       currentUser = null;
+      chatHistoryPanelLoaded = false;
+      renderChatHistoryPanel([]);
       updateAuthUi();
       stopWompiSyncLoop();
       return;
@@ -1172,10 +1226,14 @@ async function refreshCurrentUser() {
     if (currentUser) {
       startWompiSyncLoop();
     } else {
+      chatHistoryPanelLoaded = false;
+      renderChatHistoryPanel([]);
       stopWompiSyncLoop();
     }
   } catch {
     currentUser = null;
+    chatHistoryPanelLoaded = false;
+    renderChatHistoryPanel([]);
     updateAuthUi();
     stopWompiSyncLoop();
   }
@@ -1552,6 +1610,7 @@ pricesModal?.addEventListener("click", (e) => {
 
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {
+    closeChatHistoryModal();
     closePricesModal();
     closeRechargeModal();
     closeAuthModal();
@@ -3045,6 +3104,144 @@ function appendMessage(role, text) {
   chatMessages.scrollTop = chatMessages.scrollHeight;
 }
 
+function groupChatHistoryByConversation(rows) {
+  const groups = new Map();
+  for (const item of rows) {
+    const convId = String(item?.conversation_id || `legacy-${item?.id || Math.random().toString(36).slice(2)}`);
+    if (!groups.has(convId)) {
+      groups.set(convId, []);
+    }
+    groups.get(convId).push(item);
+  }
+
+  const grouped = Array.from(groups.entries()).map(([conversationId, messages]) => {
+    const sorted = messages.slice().sort((a, b) => Number(a.id || 0) - Number(b.id || 0));
+    const first = sorted[0] || {};
+    const last = sorted[sorted.length - 1] || {};
+    return {
+      conversationId,
+      messages: sorted,
+      preview: cropText(first.user_message, 90) || "Conversación",
+      createdAt: String(first.created_at || ""),
+      updatedAt: String(last.created_at || first.created_at || ""),
+      model: cropText(last.model, 70) || "-",
+    };
+  });
+
+  grouped.sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
+  return grouped;
+}
+
+function renderChatHistoryDetail(group) {
+  if (!chatHistoryDetail) return;
+  chatHistoryDetail.innerHTML = "";
+
+  if (!group || !Array.isArray(group.messages) || !group.messages.length) {
+    chatHistoryDetail.innerHTML = '<p class="chat-history-empty">Selecciona una conversación para ver todo el detalle.</p>';
+    return;
+  }
+
+  for (const item of group.messages) {
+    const entry = document.createElement("article");
+    entry.className = "chat-history-detail-entry";
+    entry.innerHTML = `
+      <div class="chat-history-meta">
+        <span>${escapeHtml(formatDate(item.created_at))}</span>
+        <span>Modelo: ${escapeHtml(cropText(item.model, 70) || "-")}</span>
+      </div>
+      <p><strong>Tú:</strong> ${escapeHtml(String(item.user_message || "-"))}</p>
+      <p><strong>Pachy IA:</strong> ${escapeHtml(String(item.assistant_message || "-"))}</p>
+    `;
+    chatHistoryDetail.appendChild(entry);
+  }
+}
+
+function renderChatHistoryPanel(items) {
+  if (!chatHistoryList) return;
+  chatHistoryList.innerHTML = "";
+
+  const rows = Array.isArray(items) ? items : [];
+  const grouped = groupChatHistoryByConversation(rows);
+  if (!grouped.length) {
+    const empty = document.createElement("p");
+    empty.className = "chat-history-empty";
+    empty.textContent = "Aun no tienes conversaciones guardadas.";
+    chatHistoryList.appendChild(empty);
+    renderChatHistoryDetail(null);
+    return;
+  }
+
+  const selectedConversationId = chatHistoryList.dataset.selectedConversationId || grouped[0].conversationId;
+  let selected = grouped.find((g) => g.conversationId === selectedConversationId) || grouped[0];
+
+  for (const group of grouped.slice(0, 120)) {
+    const card = document.createElement("article");
+    card.className = "chat-history-item";
+    if (group.conversationId === selected.conversationId) {
+      card.classList.add("is-active");
+    }
+    card.innerHTML = `
+      <div class="chat-history-meta">
+        <span>${escapeHtml(formatDate(group.updatedAt))}</span>
+        <span>${group.messages.length} mensajes</span>
+      </div>
+      <p><strong>${escapeHtml(group.preview)}</strong></p>
+      <p>Modelo reciente: ${escapeHtml(group.model)}</p>
+    `;
+    card.addEventListener("click", () => {
+      chatHistoryList.dataset.selectedConversationId = group.conversationId;
+      renderChatHistoryPanel(rows);
+    });
+    chatHistoryList.appendChild(card);
+  }
+
+  chatHistoryList.dataset.selectedConversationId = selected.conversationId;
+  renderChatHistoryDetail(selected);
+}
+
+async function loadChatHistoryPanel(force = false) {
+  if (!currentUser) {
+    renderChatHistoryPanel([]);
+    chatHistoryPanelLoaded = false;
+    return;
+  }
+  if (chatHistoryPanelLoaded && !force) return;
+
+  try {
+    if (chatHistoryList) {
+      chatHistoryList.innerHTML = '<p class="chat-history-empty">Cargando historial...</p>';
+    }
+    const resp = await fetch("/chat/history");
+    if (!resp.ok) {
+      const err = await readApiError(resp);
+      throw new Error(err || "No se pudo cargar historial");
+    }
+    const data = await resp.json();
+    renderChatHistoryPanel(Array.isArray(data?.items) ? data.items : []);
+    chatHistoryPanelLoaded = true;
+  } catch (error) {
+    const text = error instanceof Error ? error.message : "No se pudo cargar historial";
+    if (chatHistoryList) {
+      chatHistoryList.innerHTML = `<p class="chat-history-empty">${text}</p>`;
+    }
+  }
+}
+
+function openChatHistoryModal() {
+  if (!chatHistoryModal) return;
+  chatHistoryModal.hidden = false;
+  chatHistoryModal.setAttribute("aria-hidden", "false");
+  chatHistoryToggle?.setAttribute("aria-expanded", "true");
+  loadChatHistoryPanel(false);
+}
+
+function closeChatHistoryModal() {
+  if (!chatHistoryModal) return;
+  chatHistoryModal.hidden = true;
+  chatHistoryModal.setAttribute("aria-hidden", "true");
+  chatHistoryToggle?.setAttribute("aria-expanded", "false");
+}
+
 function formatBytes(value) {
   const size = Number(value || 0);
   if (!Number.isFinite(size) || size <= 0) return "0 B";
@@ -3121,6 +3318,36 @@ chatAttachInput?.addEventListener("change", () => {
   setChatAttachmentsFromInput(chatAttachInput.files);
 });
 
+chatHistoryToggle?.addEventListener("click", () => {
+  openChatHistoryModal();
+});
+
+chatHistoryClose?.addEventListener("click", () => {
+  closeChatHistoryModal();
+});
+
+chatHistoryModal?.addEventListener("click", (e) => {
+  const target = e.target;
+  if (target instanceof HTMLElement && target.dataset.closeChatHistory === "true") {
+    closeChatHistoryModal();
+  }
+});
+
+chatHistoryRefresh?.addEventListener("click", () => {
+  loadChatHistoryPanel(true);
+});
+
+chatNewConversationBtn?.addEventListener("click", () => {
+  chatHistory.length = 0;
+  activeConversationId = `conv-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  chatMessages.innerHTML = "";
+  appendMessage("assistant", "Nueva conversación iniciada. ¿Qué quieres crear con Pachy IA?");
+  chatStatus.textContent = "Listo";
+  chatStatus.className = "status completed";
+});
+
+closeChatHistoryModal();
+
 renderChatAttachments();
 
 chatForm.addEventListener("submit", async (event) => {
@@ -3148,6 +3375,9 @@ chatForm.addEventListener("submit", async (event) => {
   let sentOk = false;
 
   const context = chatHistory.slice(-8).map((m) => `${m.role}: ${m.text}`).join("\n");
+  if (!activeConversationId) {
+    activeConversationId = `conv-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  }
 
   try {
     let resp;
@@ -3155,6 +3385,7 @@ chatForm.addEventListener("submit", async (event) => {
       const formData = new FormData();
       formData.append("message", message);
       formData.append("context", context);
+      formData.append("conversation_id", activeConversationId);
       for (const file of chatAttachedFiles) {
         formData.append("files", file, file.name);
       }
@@ -3166,7 +3397,7 @@ chatForm.addEventListener("submit", async (event) => {
       resp = await fetch("/chat/message", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message, context }),
+        body: JSON.stringify({ message, context, conversation_id: activeConversationId }),
       });
     }
 
@@ -3184,6 +3415,10 @@ chatForm.addEventListener("submit", async (event) => {
     const answer = data.answer || "No hay respuesta disponible.";
     appendMessage("assistant", answer);
     chatHistory.push({ role: "assistant", text: answer });
+    chatHistoryPanelLoaded = false;
+    if (chatHistoryModal && !chatHistoryModal.hidden) {
+      loadChatHistoryPanel(true);
+    }
     chatStatus.textContent = "Listo";
     chatStatus.className = "status completed";
     sentOk = true;

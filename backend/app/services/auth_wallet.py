@@ -1,5 +1,6 @@
 import hashlib
 import hmac
+import json
 import os
 import re
 import secrets
@@ -117,6 +118,18 @@ def init_auth_wallet_db() -> None:
                             event_key TEXT UNIQUE NOT NULL,
                             created_at TEXT NOT NULL
                         );
+
+                        CREATE TABLE IF NOT EXISTS chat_history (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            user_id INTEGER NOT NULL,
+                            conversation_id TEXT NOT NULL DEFAULT '',
+                            user_message TEXT NOT NULL,
+                            assistant_message TEXT NOT NULL,
+                            model TEXT NOT NULL DEFAULT '',
+                            attachments_json TEXT NOT NULL DEFAULT '[]',
+                            created_at TEXT NOT NULL,
+                            FOREIGN KEY(user_id) REFERENCES users(id)
+                        );
             """
         )
 
@@ -134,6 +147,14 @@ def init_auth_wallet_db() -> None:
             conn.execute("ALTER TABLE users ADD COLUMN email TEXT NOT NULL DEFAULT ''")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_users_phone ON users(phone)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)")
+        chat_columns = {str(r["name"]) for r in conn.execute("PRAGMA table_info(chat_history)").fetchall()}
+        if "conversation_id" not in chat_columns:
+            conn.execute("ALTER TABLE chat_history ADD COLUMN conversation_id TEXT NOT NULL DEFAULT ''")
+            conn.execute(
+                "UPDATE chat_history SET conversation_id = 'legacy-' || id WHERE conversation_id = '' OR conversation_id IS NULL"
+            )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_chat_history_user ON chat_history(user_id, id DESC)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_chat_history_conv ON chat_history(user_id, conversation_id, id ASC)")
 
 
 def _normalize_username(username: str) -> str:
@@ -734,6 +755,108 @@ def get_recent_ledger(user_id: int, limit: int = 50) -> list[dict]:
     ]
 
 
+def record_chat_history(
+    user_id: int,
+    user_message: str,
+    assistant_message: str,
+    model: str = "",
+    conversation_id: str = "",
+    attachments: list[dict] | None = None,
+) -> dict:
+    safe_user = (user_message or "").strip() or "Mensaje con adjuntos"
+    safe_assistant = (assistant_message or "").strip() or "Sin respuesta"
+    safe_model = (model or "").strip()
+    safe_conversation_id = (conversation_id or "").strip() or f"legacy-{secrets.token_hex(8)}"
+    safe_attachments = attachments if isinstance(attachments, list) else []
+    attachments_json = json.dumps(safe_attachments, ensure_ascii=False)
+    now = _utc_now_iso()
+
+    with _get_conn() as conn:
+        conn.execute(
+            """
+            INSERT INTO chat_history (user_id, conversation_id, user_message, assistant_message, model, attachments_json, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (int(user_id), safe_conversation_id, safe_user, safe_assistant, safe_model, attachments_json, now),
+        )
+        row = conn.execute(
+            """
+            SELECT id, user_id, conversation_id, user_message, assistant_message, model, attachments_json, created_at
+            FROM chat_history
+            WHERE rowid = last_insert_rowid()
+            """
+        ).fetchone()
+
+    if row is None:
+        return {
+            "id": 0,
+            "user_id": int(user_id),
+            "conversation_id": safe_conversation_id,
+            "user_message": safe_user,
+            "assistant_message": safe_assistant,
+            "model": safe_model,
+            "attachments": safe_attachments,
+            "created_at": now,
+        }
+
+    try:
+        parsed_attachments = json.loads(str(row["attachments_json"] or "[]"))
+        if not isinstance(parsed_attachments, list):
+            parsed_attachments = []
+    except Exception:
+        parsed_attachments = []
+
+    return {
+        "id": int(row["id"]),
+        "user_id": int(row["user_id"]),
+        "conversation_id": str(row["conversation_id"] or ""),
+        "user_message": str(row["user_message"] or ""),
+        "assistant_message": str(row["assistant_message"] or ""),
+        "model": str(row["model"] or ""),
+        "attachments": parsed_attachments,
+        "created_at": str(row["created_at"] or ""),
+    }
+
+
+def list_user_chat_history(user_id: int, limit: int = 120) -> list[dict]:
+    safe_limit = max(1, min(500, int(limit)))
+    with _get_conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT id, user_id, conversation_id, user_message, assistant_message, model, attachments_json, created_at
+            FROM chat_history
+            WHERE user_id = ?
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            (int(user_id), safe_limit),
+        ).fetchall()
+
+    items: list[dict] = []
+    for row in rows:
+        try:
+            parsed_attachments = json.loads(str(row["attachments_json"] or "[]"))
+            if not isinstance(parsed_attachments, list):
+                parsed_attachments = []
+        except Exception:
+            parsed_attachments = []
+
+        items.append(
+            {
+                "id": int(row["id"]),
+                "user_id": int(row["user_id"]),
+                "conversation_id": str(row["conversation_id"] or ""),
+                "user_message": str(row["user_message"] or ""),
+                "assistant_message": str(row["assistant_message"] or ""),
+                "model": str(row["model"] or ""),
+                "attachments": parsed_attachments,
+                "created_at": str(row["created_at"] or ""),
+            }
+        )
+
+    return items
+
+
 def get_user_profile(user_id: int) -> dict:
     with _get_conn() as conn:
         row = conn.execute(
@@ -892,6 +1015,7 @@ def delete_user_account(user_id: int) -> dict:
 
         conn.execute("DELETE FROM sessions WHERE user_id = ?", (uid,))
         conn.execute("DELETE FROM wallet_ledger WHERE user_id = ?", (uid,))
+        conn.execute("DELETE FROM chat_history WHERE user_id = ?", (uid,))
         conn.execute("DELETE FROM password_reset_tokens WHERE user_id = ?", (uid,))
         conn.execute("DELETE FROM recharge_payments WHERE user_id = ?", (uid,))
         conn.execute("DELETE FROM users WHERE id = ?", (uid,))

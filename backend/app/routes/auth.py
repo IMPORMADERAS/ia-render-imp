@@ -16,6 +16,7 @@ from ..services.auth_wallet import (
     get_user_profile,
     get_recent_ledger,
     get_user_balance,
+    list_user_chat_history,
     register_user,
     require_authenticated_user,
     reset_password_from_token,
@@ -222,6 +223,7 @@ def account_summary(user: AuthenticatedUser = Depends(require_authenticated_user
         "balance_cop": get_user_balance(user.user_id),
         "ledger": get_recent_ledger(user.user_id, limit=80),
         "generations": list_user_generation_history(user.user_id, limit=120),
+        "chat_history": list_user_chat_history(user.user_id, limit=120),
     }
 
 

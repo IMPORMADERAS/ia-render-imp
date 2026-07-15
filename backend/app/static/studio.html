@@ -539,7 +539,11 @@
 
         <div id="chat-shell" class="chat-shell" hidden>
           <div class="preview-head">
-            <h2>Pachy IA</h2>
+            <div class="chat-head-main">
+              <h2>Pachy IA</h2>
+              <button id="chat-new-conversation" type="button" class="chat-history-toggle">Nueva conversación</button>
+              <button id="chat-history-toggle" type="button" class="chat-history-toggle" aria-expanded="false">Historial de conversaciones</button>
+            </div>
             <p id="chat-status" class="status idle">Listo</p>
           </div>
           <div id="chat-messages" class="chat-messages"></div>
@@ -561,6 +565,32 @@
         - <a href="/que-es-iaimp">¿Que es IA-IMP?</a> - <a href="/documentacion">Documentacion</a>
       </p>
     </footer>
+
+    <div id="chat-history-modal" class="modal" hidden aria-hidden="true" role="dialog" aria-labelledby="chat-history-title">
+      <div class="modal__backdrop" data-close-chat-history="true"></div>
+      <section class="modal__card chat-history-modal-card" role="document">
+        <header class="modal__head">
+          <h3 id="chat-history-title">Historial de conversaciones Pachy IA</h3>
+          <div class="modal__head-actions">
+            <button id="chat-history-refresh" type="button" class="top-action-btn top-action-btn--ghost">Actualizar</button>
+            <button id="chat-history-close" type="button" class="modal__close" aria-label="Cerrar">✕</button>
+          </div>
+        </header>
+        <p class="hint">Tus conversaciones se guardan en la nube por usuario y están disponibles en cualquier dispositivo.</p>
+
+        <div class="chat-history-modal-grid">
+          <aside class="chat-history-sidebar">
+            <h4 class="modal__subhead">Conversaciones</h4>
+            <div id="chat-history-list" class="chat-history-list"></div>
+          </aside>
+
+          <section class="chat-history-detail">
+            <h4 class="modal__subhead">Detalle completo</h4>
+            <div id="chat-history-detail" class="chat-history-detail-list"></div>
+          </section>
+        </div>
+      </section>
+    </div>
 
     <div id="prices-modal" class="modal" hidden aria-hidden="true" role="dialog" aria-labelledby="prices-title">
       <div class="modal__backdrop" data-close-prices="true"></div>
@@ -834,6 +864,21 @@
               </tr>
             </thead>
             <tbody id="account-generations-body"></tbody>
+          </table>
+        </div>
+
+        <h4 class="modal__subhead">Historial Pachy IA</h4>
+        <div class="prices-table-wrap">
+          <table class="prices-table">
+            <thead>
+              <tr>
+                <th>Fecha</th>
+                <th>Consulta</th>
+                <th>Respuesta</th>
+                <th>Modelo</th>
+              </tr>
+            </thead>
+            <tbody id="account-chat-history-body"></tbody>
           </table>
         </div>
       </section>
