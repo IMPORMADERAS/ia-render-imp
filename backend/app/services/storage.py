@@ -1,129 +1,215 @@
 import json
+import sqlite3
 from pathlib import Path
 from typing import Any
 
 from ..config import settings
 
 
+DB_PATH = Path(settings.data_dir) / "generations.db"
 JOBS_PATH = Path(settings.data_dir) / "jobs.json"
+ANIMS_PATH = Path(settings.data_dir) / "animations.json"
+MUSIC_PATH = Path(settings.data_dir) / "music_jobs.json"
 
 
-def _load_jobs() -> dict[str, Any]:
-    if not JOBS_PATH.exists():
-        return {}
-    return json.loads(JOBS_PATH.read_text(encoding="utf-8"))
+def _get_conn() -> sqlite3.Connection:
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(DB_PATH, timeout=30)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")
+    conn.execute("PRAGMA busy_timeout=5000")
+    return conn
 
 
-def _save_jobs(jobs: dict[str, Any]) -> None:
-    JOBS_PATH.parent.mkdir(parents=True, exist_ok=True)
-    JOBS_PATH.write_text(json.dumps(jobs, indent=2), encoding="utf-8")
+def _record_index_fields(payload: dict[str, Any]) -> tuple[int, str]:
+    user_id = int(payload.get("billed_user_id") or 0)
+    updated_at = str(payload.get("updated_at") or payload.get("completed_at") or payload.get("started_at") or "")
+    return user_id, updated_at
+
+
+def _upsert_record(table: str, record_id: str, payload: dict[str, Any]) -> None:
+    user_id, updated_at = _record_index_fields(payload)
+    payload_json = json.dumps(payload, ensure_ascii=False)
+    with _get_conn() as conn:
+        conn.execute(
+            f"""
+            INSERT INTO {table} (id, user_id, updated_at, payload_json)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                user_id=excluded.user_id,
+                updated_at=excluded.updated_at,
+                payload_json=excluded.payload_json
+            """,
+            (str(record_id), user_id, updated_at, payload_json),
+        )
+
+
+def _get_record(table: str, record_id: str) -> dict[str, Any] | None:
+    with _get_conn() as conn:
+        row = conn.execute(f"SELECT payload_json FROM {table} WHERE id = ?", (str(record_id),)).fetchone()
+    if row is None:
+        return None
+    try:
+        data = json.loads(str(row["payload_json"] or "{}"))
+    except Exception:
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _iter_records(table: str, user_id: int | None = None) -> list[tuple[str, dict[str, Any]]]:
+    query = f"SELECT id, payload_json FROM {table}"
+    params: tuple[Any, ...] = ()
+    if user_id is not None:
+        query += " WHERE user_id = ?"
+        params = (int(user_id),)
+
+    with _get_conn() as conn:
+        rows = conn.execute(query, params).fetchall()
+
+    items: list[tuple[str, dict[str, Any]]] = []
+    for row in rows:
+        try:
+            payload = json.loads(str(row["payload_json"] or "{}"))
+        except Exception:
+            continue
+        if isinstance(payload, dict):
+            items.append((str(row["id"]), payload))
+    return items
+
+
+def _migrate_legacy_json_file(table: str, file_path: Path) -> None:
+    if not file_path.exists():
+        return
+    try:
+        raw = json.loads(file_path.read_text(encoding="utf-8"))
+    except Exception:
+        return
+    if not isinstance(raw, dict):
+        return
+
+    for record_id, payload in raw.items():
+        if not isinstance(payload, dict):
+            continue
+        _upsert_record(table, str(record_id), payload)
+
+
+def init_generation_storage_db() -> None:
+    with _get_conn() as conn:
+        conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS jobs (
+              id TEXT PRIMARY KEY,
+              user_id INTEGER NOT NULL DEFAULT 0,
+              updated_at TEXT NOT NULL DEFAULT '',
+              payload_json TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS anims (
+              id TEXT PRIMARY KEY,
+              user_id INTEGER NOT NULL DEFAULT 0,
+              updated_at TEXT NOT NULL DEFAULT '',
+              payload_json TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS music_jobs (
+              id TEXT PRIMARY KEY,
+              user_id INTEGER NOT NULL DEFAULT 0,
+              updated_at TEXT NOT NULL DEFAULT '',
+              payload_json TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS storage_migrations (
+              migration_key TEXT PRIMARY KEY,
+              done_at TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_jobs_user_updated ON jobs(user_id, updated_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_anims_user_updated ON anims(user_id, updated_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_music_user_updated ON music_jobs(user_id, updated_at DESC);
+            """
+        )
+
+        done = {
+            str(row["migration_key"])
+            for row in conn.execute("SELECT migration_key FROM storage_migrations").fetchall()
+        }
+
+    migrations = [
+        ("jobs-json-to-sqlite-v1", "jobs", JOBS_PATH),
+        ("anims-json-to-sqlite-v1", "anims", ANIMS_PATH),
+        ("music-json-to-sqlite-v1", "music_jobs", MUSIC_PATH),
+    ]
+
+    for key, table, path in migrations:
+        if key in done:
+            continue
+        _migrate_legacy_json_file(table, path)
+        with _get_conn() as conn:
+            conn.execute(
+                "INSERT OR IGNORE INTO storage_migrations (migration_key, done_at) VALUES (?, datetime('now'))",
+                (key,),
+            )
 
 
 def create_job(job_id: str, payload: dict[str, Any]) -> None:
-    jobs = _load_jobs()
-    jobs[job_id] = payload
-    _save_jobs(jobs)
+    _upsert_record("jobs", job_id, payload)
 
 
 def update_job(job_id: str, updates: dict[str, Any]) -> None:
-    jobs = _load_jobs()
-    if job_id not in jobs:
+    current = get_job(job_id)
+    if current is None:
         return
-    jobs[job_id].update(updates)
-    _save_jobs(jobs)
+    current.update(updates)
+    _upsert_record("jobs", job_id, current)
 
 
 def get_job(job_id: str) -> dict[str, Any] | None:
-    jobs = _load_jobs()
-    return jobs.get(job_id)
+    return _get_record("jobs", job_id)
 
 
 def get_next_sequence() -> int:
-    jobs = _load_jobs()
     max_seq = 0
-
-    for payload in jobs.values():
+    for _, payload in _iter_records("jobs"):
         try:
             seq = int(payload.get("sequence", 0))
         except (TypeError, ValueError):
             seq = 0
         if seq > max_seq:
             max_seq = seq
-
-    if max_seq == 0:
-        # Backward compatibility for jobs created before sequence support.
-        return len(jobs) + 1
-    return max_seq + 1
-
-
-# ── Animation job storage ────────────────────────────────────────────────────
-
-ANIMS_PATH = Path(settings.data_dir) / "animations.json"
-
-
-def _load_anims() -> dict[str, Any]:
-    if not ANIMS_PATH.exists():
-        return {}
-    return json.loads(ANIMS_PATH.read_text(encoding="utf-8"))
-
-
-def _save_anims(anims: dict[str, Any]) -> None:
-    ANIMS_PATH.parent.mkdir(parents=True, exist_ok=True)
-    ANIMS_PATH.write_text(json.dumps(anims, indent=2), encoding="utf-8")
+    return max_seq + 1 if max_seq > 0 else 1
 
 
 def create_anim(anim_id: str, payload: dict[str, Any]) -> None:
-    anims = _load_anims()
-    anims[anim_id] = payload
-    _save_anims(anims)
+    _upsert_record("anims", anim_id, payload)
 
 
 def update_anim(anim_id: str, updates: dict[str, Any]) -> None:
-    anims = _load_anims()
-    if anim_id not in anims:
+    current = get_anim(anim_id)
+    if current is None:
         return
-    anims[anim_id].update(updates)
-    _save_anims(anims)
+    current.update(updates)
+    _upsert_record("anims", anim_id, current)
 
 
 def get_anim(anim_id: str) -> dict[str, Any] | None:
-    anims = _load_anims()
-    return anims.get(anim_id)
-
-
-# ── Music job storage ────────────────────────────────────────────────────────
-
-MUSIC_PATH = Path(settings.data_dir) / "music_jobs.json"
-
-
-def _load_music() -> dict[str, Any]:
-    if not MUSIC_PATH.exists():
-        return {}
-    return json.loads(MUSIC_PATH.read_text(encoding="utf-8"))
-
-
-def _save_music(items: dict[str, Any]) -> None:
-    MUSIC_PATH.parent.mkdir(parents=True, exist_ok=True)
-    MUSIC_PATH.write_text(json.dumps(items, indent=2), encoding="utf-8")
+    return _get_record("anims", anim_id)
 
 
 def create_music(music_id: str, payload: dict[str, Any]) -> None:
-    items = _load_music()
-    items[music_id] = payload
-    _save_music(items)
+    _upsert_record("music_jobs", music_id, payload)
 
 
 def update_music(music_id: str, updates: dict[str, Any]) -> None:
-    items = _load_music()
-    if music_id not in items:
+    current = get_music(music_id)
+    if current is None:
         return
-    items[music_id].update(updates)
-    _save_music(items)
+    current.update(updates)
+    _upsert_record("music_jobs", music_id, current)
 
 
 def get_music(music_id: str) -> dict[str, Any] | None:
-    items = _load_music()
-    return items.get(music_id)
+    return _get_record("music_jobs", music_id)
 
 
 def list_user_generation_history(user_id: int, limit: int = 100) -> list[dict[str, Any]]:
@@ -132,8 +218,7 @@ def list_user_generation_history(user_id: int, limit: int = 100) -> list[dict[st
 
     items: list[dict[str, Any]] = []
 
-    jobs = _load_jobs()
-    for job_id, payload in jobs.items():
+    for job_id, payload in _iter_records("jobs", user_id=uid):
         if int(payload.get("billed_user_id") or 0) != uid:
             continue
 
@@ -163,8 +248,7 @@ def list_user_generation_history(user_id: int, limit: int = 100) -> list[dict[st
             }
         )
 
-    anims = _load_anims()
-    for anim_id, payload in anims.items():
+    for anim_id, payload in _iter_records("anims", user_id=uid):
         if int(payload.get("billed_user_id") or 0) != uid:
             continue
 
@@ -189,8 +273,7 @@ def list_user_generation_history(user_id: int, limit: int = 100) -> list[dict[st
             }
         )
 
-    music_items = _load_music()
-    for music_id, payload in music_items.items():
+    for music_id, payload in _iter_records("music_jobs", user_id=uid):
         if int(payload.get("billed_user_id") or 0) != uid:
             continue
 
@@ -225,7 +308,7 @@ def get_user_generation_download(user_id: int, output_type: str, output_id: str)
     safe_type = str(output_type).strip().lower()
 
     if safe_type == "job":
-        record = _load_jobs().get(safe_id)
+        record = get_job(safe_id)
         if record is None:
             raise ValueError("Generacion no encontrada")
         if int(record.get("billed_user_id") or 0) != uid:
@@ -241,7 +324,7 @@ def get_user_generation_download(user_id: int, output_type: str, output_id: str)
         return p, filename
 
     if safe_type == "anim":
-        record = _load_anims().get(safe_id)
+        record = get_anim(safe_id)
         if record is None:
             raise ValueError("Generacion no encontrada")
         if int(record.get("billed_user_id") or 0) != uid:
@@ -256,7 +339,7 @@ def get_user_generation_download(user_id: int, output_type: str, output_id: str)
         return p, filename
 
     if safe_type == "music":
-        record = _load_music().get(safe_id)
+        record = get_music(safe_id)
         if record is None:
             raise ValueError("Generacion no encontrada")
         if int(record.get("billed_user_id") or 0) != uid:
@@ -298,25 +381,21 @@ def delete_user_generation_data(user_id: int) -> dict[str, int]:
     deleted_music = 0
     deleted_files = 0
 
-    jobs = _load_jobs()
-    kept_jobs: dict[str, Any] = {}
-    for job_id, payload in jobs.items():
+    job_rows = _iter_records("jobs", user_id=uid)
+    for job_id, payload in job_rows:
         if int(payload.get("billed_user_id") or 0) != uid:
-            kept_jobs[job_id] = payload
             continue
 
         deleted_jobs += 1
         deleted_files += int(_safe_unlink(payload.get("input_image")))
         deleted_files += int(_safe_unlink(payload.get("output_image")))
 
-    if len(kept_jobs) != len(jobs):
-        _save_jobs(kept_jobs)
+    with _get_conn() as conn:
+        conn.execute("DELETE FROM jobs WHERE user_id = ?", (uid,))
 
-    anims = _load_anims()
-    kept_anims: dict[str, Any] = {}
-    for anim_id, payload in anims.items():
+    anim_rows = _iter_records("anims", user_id=uid)
+    for anim_id, payload in anim_rows:
         if int(payload.get("billed_user_id") or 0) != uid:
-            kept_anims[anim_id] = payload
             continue
 
         deleted_anims += 1
@@ -324,21 +403,19 @@ def delete_user_generation_data(user_id: int) -> dict[str, int]:
         deleted_files += int(_safe_unlink(payload.get("source_video")))
         deleted_files += int(_safe_unlink(payload.get("video_output")))
 
-    if len(kept_anims) != len(anims):
-        _save_anims(kept_anims)
+    with _get_conn() as conn:
+        conn.execute("DELETE FROM anims WHERE user_id = ?", (uid,))
 
-    music_items = _load_music()
-    kept_music: dict[str, Any] = {}
-    for music_id, payload in music_items.items():
+    music_rows = _iter_records("music_jobs", user_id=uid)
+    for music_id, payload in music_rows:
         if int(payload.get("billed_user_id") or 0) != uid:
-            kept_music[music_id] = payload
             continue
 
         deleted_music += 1
         deleted_files += int(_safe_unlink(payload.get("audio_output")))
 
-    if len(kept_music) != len(music_items):
-        _save_music(kept_music)
+    with _get_conn() as conn:
+        conn.execute("DELETE FROM music_jobs WHERE user_id = ?", (uid,))
 
     return {
         "deleted_jobs": deleted_jobs,
@@ -346,3 +423,6 @@ def delete_user_generation_data(user_id: int) -> dict[str, int]:
         "deleted_music": deleted_music,
         "deleted_files": deleted_files,
     }
+
+
+init_generation_storage_db()

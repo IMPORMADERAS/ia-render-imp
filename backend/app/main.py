@@ -20,10 +20,12 @@ from .services.auth_wallet import init_auth_wallet_db
 from .services.auth_wallet import require_authenticated_user
 from .services.admin_auth import init_admin_auth_db
 from .services.pricing_store import get_pricing_config
+from .services.storage import init_generation_storage_db
 
 ensure_directories()
 init_auth_wallet_db()
 init_admin_auth_db()
+init_generation_storage_db()
 
 app = FastAPI(title=settings.app_name, version="0.1.0")
 static_dir = Path(__file__).parent / "static"
