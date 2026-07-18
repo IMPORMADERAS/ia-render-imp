@@ -268,6 +268,119 @@ class Animator:
             if temp_path.exists():
                 temp_path.unlink(missing_ok=True)
 
+    @staticmethod
+    def _detect_black_bar_crop(video_path: str) -> tuple[int, int, int, int] | None:
+        # Detect the active image area when providers return letterboxed/pillarboxed frames.
+        try:
+            result = subprocess.run(
+                [
+                    "ffmpeg",
+                    "-hide_banner",
+                    "-i",
+                    video_path,
+                    "-vf",
+                    "cropdetect=24:16:0",
+                    "-frames:v",
+                    "120",
+                    "-f",
+                    "null",
+                    "-",
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+        except Exception:
+            return None
+
+        stderr = str(result.stderr or "")
+        best: tuple[int, int, int, int] | None = None
+        best_area = 0
+
+        for line in stderr.splitlines():
+            marker = " crop="
+            idx = line.find(marker)
+            if idx < 0:
+                continue
+
+            crop_expr = line[idx + len(marker) :].strip()
+            parts = crop_expr.split(":")
+            if len(parts) != 4:
+                continue
+
+            try:
+                w = int(parts[0])
+                h = int(parts[1])
+                x = int(parts[2])
+                y = int(parts[3])
+            except Exception:
+                continue
+
+            if w <= 0 or h <= 0 or x < 0 or y < 0:
+                continue
+
+            area = w * h
+            if area > best_area:
+                best_area = area
+                best = (w, h, x, y)
+
+        return best
+
+    def _trim_black_bars_for_influencer(self, output_video_path: str) -> None:
+        output_size = self._probe_video_size(output_video_path)
+        if output_size is None:
+            return
+
+        detected = self._detect_black_bar_crop(output_video_path)
+        if detected is None:
+            return
+
+        out_w, out_h = output_size
+        crop_w, crop_h, crop_x, crop_y = detected
+
+        crop_w = self._round_even(crop_w)
+        crop_h = self._round_even(crop_h)
+
+        if crop_w <= 0 or crop_h <= 0 or crop_w > out_w or crop_h > out_h:
+            return
+
+        if crop_x + crop_w > out_w:
+            crop_x = max(0, out_w - crop_w)
+        if crop_y + crop_h > out_h:
+            crop_y = max(0, out_h - crop_h)
+
+        # Skip tiny trims to avoid unnecessary re-encoding.
+        trim_x = abs(out_w - crop_w)
+        trim_y = abs(out_h - crop_h)
+        if trim_x < 8 and trim_y < 8:
+            return
+
+        target = Path(output_video_path)
+        temp_path = target.with_name(f"{target.stem}.trimmed{target.suffix}")
+        cmd = [
+            "ffmpeg",
+            "-y",
+            "-i",
+            output_video_path,
+            "-vf",
+            f"crop={crop_w}:{crop_h}:{crop_x}:{crop_y}",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "veryfast",
+            "-crf",
+            "18",
+            "-c:a",
+            "copy",
+            str(temp_path),
+        ]
+        try:
+            subprocess.run(cmd, check=True, capture_output=True, text=True)
+            temp_path.replace(target)
+        finally:
+            if temp_path.exists():
+                temp_path.unlink(missing_ok=True)
+
     def animate_replicate(
         self,
         image_path: str,
@@ -326,6 +439,9 @@ class Animator:
             output = self._run_prediction_with_polling(model=settings.replicate_influencer_model, payload=payload)
 
         self._write_output_file(output=output, target_path=output_video_path, context="influencer")
+
+        # First remove hard black bars if the provider returned a letterboxed frame.
+        self._trim_black_bars_for_influencer(output_video_path)
 
         # Preserve the character image format (vertical/square/horizontal) to avoid black bars.
         reference_size = self._probe_image_size(reference_image_path)
