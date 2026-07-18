@@ -279,9 +279,9 @@ class Animator:
                     "-i",
                     video_path,
                     "-vf",
-                    "cropdetect=24:16:0",
+                    "cropdetect=64:16:0",
                     "-frames:v",
-                    "120",
+                    "240",
                     "-f",
                     "null",
                     "-",
@@ -405,6 +405,33 @@ class Animator:
         duration = int(perf_counter() - started)
         return {"duration_seconds": max(1, duration)}
 
+    @staticmethod
+    def _influencer_resolution_for_image(image_path: str, requested_resolution: str) -> str | None:
+        """
+        Return the resolution string to pass to the influencer model, or None to omit the
+        parameter entirely.
+
+        Rule:
+        - Landscape image (w > h): honour requested_resolution (e.g. "1080p").
+        - Portrait or square image: return None so the model uses the image's native ratio
+          instead of forcing a 16:9 output that would introduce black bars.
+        """
+        try:
+            from PIL import Image, ImageOps  # already imported at module level via _probe_image_size
+            with Image.open(image_path) as raw:
+                img = ImageOps.exif_transpose(raw)
+                w, h = img.size
+        except Exception:
+            return requested_resolution
+
+        if w > h:
+            # Landscape — the requested resolution (16:9) fits naturally.
+            return requested_resolution if requested_resolution in {"720p", "1080p"} else "720p"
+
+        # Portrait or square — do NOT send a landscape resolution; let the model
+        # derive the output dimensions from the reference image.
+        return None
+
     def animate_influencer_replicate(
         self,
         source_video_path: str,
@@ -422,28 +449,34 @@ class Animator:
 
         os.environ["REPLICATE_API_TOKEN"] = settings.replicate_api_token
 
-        safe_resolution = resolution if resolution in {"720p", "1080p"} else "720p"
         safe_fps = target_fps if target_fps in {"original", "24", "48"} else "original"
 
+        # Decide resolution BEFORE opening the files so we can read image dimensions.
+        resolution_param = self._influencer_resolution_for_image(reference_image_path, resolution)
+
         with open(source_video_path, "rb") as source_video, open(reference_image_path, "rb") as reference_image:
-            payload = {
+            payload: dict = {
                 "video": source_video,
                 "image": reference_image,
                 "instruction_prompt": instruction_prompt.strip(),
-                "resolution": safe_resolution,
                 "target_fps": safe_fps,
                 "save_audio": True,
                 "ignore_audio": False,
                 "turbo": bool(turbo),
             }
+            # Only include resolution when the image is landscape — avoids forcing a 16:9
+            # output (with black bars) on portrait/square reference images.
+            if resolution_param is not None:
+                payload["resolution"] = resolution_param
+
             output = self._run_prediction_with_polling(model=settings.replicate_influencer_model, payload=payload)
 
         self._write_output_file(output=output, target_path=output_video_path, context="influencer")
 
-        # First remove hard black bars if the provider returned a letterboxed frame.
+        # Safety net: strip any residual letterbox/pillarbox bars the provider may still add.
         self._trim_black_bars_for_influencer(output_video_path)
 
-        # Preserve the character image format (vertical/square/horizontal) to avoid black bars.
+        # Final crop to exactly match the reference image aspect ratio.
         reference_size = self._probe_image_size(reference_image_path)
         if reference_size is not None:
             self._crop_video_to_target_aspect_ratio(
