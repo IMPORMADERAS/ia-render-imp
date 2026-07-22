@@ -23,7 +23,7 @@
       </div>
       <div class="topbar-actions">
         <label class="import-btn" for="mediaInput">Importar Media</label>
-        <input id="mediaInput" type="file" accept="video/*,audio/*" multiple />
+        <input id="mediaInput" type="file" accept="video/*,audio/*,image/*" multiple />
         <select id="exportPreset" class="export-preset" aria-label="Formato de exportacion">
           <option value="square">Cuadrado 1200 x 1200</option>
           <option value="landscape" selected>Horizontal 16:9 1920 x 1080</option>
@@ -37,6 +37,14 @@
         </select>
         <button id="undoBtn" class="secondary">Deshacer</button>
         <button id="redoBtn" class="secondary">Rehacer</button>
+        <button id="saveProjectBtn" class="secondary">Guardar proyecto</button>
+        <button id="openProjectBtn" class="secondary">Abrir archivo</button>
+        <input
+          id="projectFileInput"
+          type="file"
+          accept=".studioimp.json,application/json"
+          aria-label="Abrir proyecto Studio IMP"
+        />
         <button id="exportMp4" class="secondary">Exportar MP4</button>
         <span id="exportStatus" class="export-status">Listo</span>
       </div>
@@ -97,6 +105,7 @@
       <section class="center-stage">
         <div class="preview-wrapper">
           <video id="videoPreview" controls crossorigin="anonymous"></video>
+          <img id="imagePreview" alt="Preview de imagen" />
           <div id="fadeOverlay"></div>
           <div id="textLayer"></div>
           <div id="exportOverlay" class="export-overlay" aria-live="polite" aria-hidden="true">
@@ -132,6 +141,7 @@
             <div class="timeline-actions">
               <button id="addVideoTrack" class="secondary">+ Video</button>
               <button id="addAudioTrack" class="secondary">+ Audio</button>
+              <button id="addImageMedia" class="secondary">+ Imagen</button>
               <button id="addTextTrack" class="secondary">+ Texto</button>
             </div>
           </div>
@@ -149,6 +159,11 @@
               <div class="track-group">
                 <p class="group-title">Pistas de Video</p>
                 <div id="videoTracks"></div>
+              </div>
+
+              <div class="track-group">
+                <p class="group-title">Pistas de Imagen</p>
+                <div id="imageTracks"></div>
               </div>
 
               <div class="track-group">
