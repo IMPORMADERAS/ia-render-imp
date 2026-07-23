@@ -1590,7 +1590,7 @@ function setTimelineTime(projectTime, options = {}) {
     }
   }
 
-  if (autoPlay || state.playback.isTimelinePlaying) {
+  if ((autoPlay || state.playback.isTimelinePlaying) && videoPreview.paused) {
     videoPreview.play().catch(() => {});
   }
 
@@ -1655,7 +1655,24 @@ function timelinePlaybackFrame(timestamp) {
   state.playback.lastFrameMs = timestamp;
 
   const projectDuration = getProjectDuration();
-  const nextTime = state.playback.timelineTime + deltaSeconds;
+  let nextTime = state.playback.timelineTime + deltaSeconds;
+
+  // On mobile Safari, using the native player clock reduces jitter caused by frequent seeks.
+  if (IS_MOBILE_DEVICE) {
+    const preview = getPreviewClipRef();
+    if (
+      preview &&
+      preview.clip.type === "video" &&
+      Number.isFinite(videoPreview.currentTime) &&
+      !videoPreview.paused
+    ) {
+      nextTime = clamp(
+        preview.clip.timelineStart + (videoPreview.currentTime - preview.clip.trimStart),
+        0,
+        projectDuration
+      );
+    }
+  }
   state.playback.lastUiFrameMs = timestamp;
 
   if (nextTime >= projectDuration) {
