@@ -65,6 +65,8 @@ const TEXT_TRACK_NAME_PREFIX = "T";
 const IS_MOBILE_LAYOUT = window.matchMedia("(max-width: 900px)").matches;
 const IS_MOBILE_UA = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || "");
 const IS_MOBILE_DEVICE = IS_MOBILE_LAYOUT || IS_MOBILE_UA;
+const MOBILE_UI_FRAME_MS = 66;
+const MOBILE_VIDEO_SEEK_TOLERANCE = 0.55;
 const TEXT_FONT_OPTIONS = [
   { value: "Manrope", label: "Manrope" },
   { value: "Chakra Petch", label: "Chakra Petch" },
@@ -149,7 +151,9 @@ function connectElementToExportBus(element) {
 
   sourceNode.disconnect();
   sourceNode.connect(destination);
-  sourceNode.connect(context.destination);
+  if (!IS_MOBILE_DEVICE) {
+    sourceNode.connect(context.destination);
+  }
 }
 
 function prepareExportAudioRouting() {
@@ -1566,7 +1570,8 @@ function setTimelineTime(projectTime, options = {}) {
   }
 
   const drift = Math.abs((videoPreview.currentTime || 0) - resolved.localTime);
-  const needsSeek = forceSeek || sourceChanged || drift > 0.2;
+  const seekTolerance = IS_MOBILE_DEVICE ? MOBILE_VIDEO_SEEK_TOLERANCE : 0.2;
+  const needsSeek = forceSeek || sourceChanged || drift > seekTolerance;
 
   if (needsSeek) {
     try {
@@ -1637,7 +1642,7 @@ function timelinePlaybackFrame(timestamp) {
     return;
   }
 
-  if (IS_MOBILE_DEVICE && state.playback.lastUiFrameMs && timestamp - state.playback.lastUiFrameMs < 33) {
+  if (IS_MOBILE_DEVICE && state.playback.lastUiFrameMs && timestamp - state.playback.lastUiFrameMs < MOBILE_UI_FRAME_MS) {
     state.playback.rafId = requestAnimationFrame(timelinePlaybackFrame);
     return;
   }
@@ -1703,16 +1708,16 @@ function getExportRuntimeConfig(profile) {
     };
   }
 
-  const maxLongEdge = 1280;
+  const maxLongEdge = 960;
   const longEdge = Math.max(profile.width, profile.height);
   const scale = longEdge > maxLongEdge ? maxLongEdge / longEdge : 1;
 
   return {
-    width: Math.max(640, Math.round(profile.width * scale)),
-    height: Math.max(640, Math.round(profile.height * scale)),
-    fps: 24,
-    videoBitsPerSecond: 6_000_000,
-    audioBitsPerSecond: 160_000,
+    width: Math.max(540, Math.round(profile.width * scale)),
+    height: Math.max(540, Math.round(profile.height * scale)),
+    fps: 20,
+    videoBitsPerSecond: 3_500_000,
+    audioBitsPerSecond: 128_000,
     modeLabel: "Modo movil fluido"
   };
 }
