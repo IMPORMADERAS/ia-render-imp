@@ -62,6 +62,9 @@ const MIN_TIMELINE_WIDTH = 800;
 const TRACK_LABEL_WIDTH_PX = 92;
 const DEFAULT_TEXT_FONT = "Manrope";
 const TEXT_TRACK_NAME_PREFIX = "T";
+const IS_MOBILE_LAYOUT = window.matchMedia("(max-width: 900px)").matches;
+const IS_MOBILE_UA = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || "");
+const IS_MOBILE_DEVICE = IS_MOBILE_LAYOUT || IS_MOBILE_UA;
 const TEXT_FONT_OPTIONS = [
   { value: "Manrope", label: "Manrope" },
   { value: "Chakra Petch", label: "Chakra Petch" },
@@ -90,6 +93,7 @@ const state = {
     isTimelinePlaying: false,
     timelineTime: 0,
     lastFrameMs: 0,
+    lastUiFrameMs: 0,
     rafId: null
   },
   drag: {
@@ -974,7 +978,7 @@ async function saveProjectToFile() {
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = `studio-imp-project-${getTimestampForFilename()}.studioimp.json`;
+    link.download = `studio-imp-project-${getTimestampForFilename()}.iaimp`;
     link.click();
     URL.revokeObjectURL(url);
     setExportStatus("Proyecto guardado");
@@ -1619,6 +1623,7 @@ function beginPlayheadDrag(clientX) {
 function stopTimelinePlayback() {
   state.playback.isTimelinePlaying = false;
   state.playback.lastFrameMs = 0;
+  state.playback.lastUiFrameMs = 0;
   if (state.playback.rafId) {
     cancelAnimationFrame(state.playback.rafId);
     state.playback.rafId = null;
@@ -1632,6 +1637,11 @@ function timelinePlaybackFrame(timestamp) {
     return;
   }
 
+  if (IS_MOBILE_DEVICE && state.playback.lastUiFrameMs && timestamp - state.playback.lastUiFrameMs < 33) {
+    state.playback.rafId = requestAnimationFrame(timelinePlaybackFrame);
+    return;
+  }
+
   if (!state.playback.lastFrameMs) {
     state.playback.lastFrameMs = timestamp;
   }
@@ -1641,6 +1651,7 @@ function timelinePlaybackFrame(timestamp) {
 
   const projectDuration = getProjectDuration();
   const nextTime = state.playback.timelineTime + deltaSeconds;
+  state.playback.lastUiFrameMs = timestamp;
 
   if (nextTime >= projectDuration) {
     setTimelineTime(projectDuration, { forceSeek: false });
@@ -1678,6 +1689,32 @@ function getExportProfile() {
     return { id: "vertical", width: 1080, height: 1920, label: "9:16" };
   }
   return { id: "landscape", width: 1920, height: 1080, label: "16:9" };
+}
+
+function getExportRuntimeConfig(profile) {
+  if (!IS_MOBILE_DEVICE) {
+    return {
+      width: profile.width,
+      height: profile.height,
+      fps: 30,
+      videoBitsPerSecond: 16_000_000,
+      audioBitsPerSecond: 320_000,
+      modeLabel: "Calidad alta"
+    };
+  }
+
+  const maxLongEdge = 1280;
+  const longEdge = Math.max(profile.width, profile.height);
+  const scale = longEdge > maxLongEdge ? maxLongEdge / longEdge : 1;
+
+  return {
+    width: Math.max(640, Math.round(profile.width * scale)),
+    height: Math.max(640, Math.round(profile.height * scale)),
+    fps: 24,
+    videoBitsPerSecond: 6_000_000,
+    audioBitsPerSecond: 160_000,
+    modeLabel: "Modo movil fluido"
+  };
 }
 
 function getExportColorProfile() {
@@ -1821,16 +1858,18 @@ async function exportTimeline() {
   }
 
   const profile = getExportProfile();
+  const runtimeConfig = getExportRuntimeConfig(profile);
   const colorProfile = getExportColorProfile();
-  const exportWidth = profile.width;
-  const exportHeight = profile.height;
-  const videoBitsPerSecond = 16_000_000;
-  const audioBitsPerSecond = 320_000;
+  const exportWidth = runtimeConfig.width;
+  const exportHeight = runtimeConfig.height;
+  const exportFps = runtimeConfig.fps;
+  const videoBitsPerSecond = runtimeConfig.videoBitsPerSecond;
+  const audioBitsPerSecond = runtimeConfig.audioBitsPerSecond;
   const projectDuration = Math.max(1, getProjectDuration());
   const maxWaitMs = Math.ceil(projectDuration * 1000 + 20000);
 
   let progressTimer = null;
-  let paintRaf = null;
+  let paintTimer = null;
   let exportStartMs = 0;
 
   try {
@@ -1838,7 +1877,7 @@ async function exportTimeline() {
     setExportStatus("Exportando...");
     setExportOverlayProgress(
       0,
-      `Rendering ${profile.label} ${exportWidth}x${exportHeight} | ${colorProfile.label}`
+      `Rendering ${profile.label} ${exportWidth}x${exportHeight} | ${colorProfile.label} | ${runtimeConfig.modeLabel}`
     );
     exportStartMs = Date.now();
     stopAllTimelineAudio();
@@ -1852,6 +1891,8 @@ async function exportTimeline() {
     if (!ctx) {
       throw new Error("CANVAS_CONTEXT");
     }
+
+    const frameDelay = Math.max(16, Math.round(1000 / exportFps));
 
     const paintFrame = () => {
       ctx.fillStyle = "#000000";
@@ -1904,12 +1945,12 @@ async function exportTimeline() {
       }
 
       drawTextLayerOnCanvas(ctx, exportWidth, exportHeight, state.playback.timelineTime || 0);
-      paintRaf = requestAnimationFrame(paintFrame);
+      paintTimer = window.setTimeout(paintFrame, frameDelay);
     };
 
     paintFrame();
 
-    const stream = exportCanvas.captureStream(30);
+    const stream = exportCanvas.captureStream(exportFps);
     prepareExportAudioRouting();
     const { context, destination } = getExportAudioBus();
     await context.resume();
@@ -1955,9 +1996,9 @@ async function exportTimeline() {
     }
     await recorderDone;
 
-    if (paintRaf) {
-      cancelAnimationFrame(paintRaf);
-      paintRaf = null;
+    if (paintTimer) {
+      clearTimeout(paintTimer);
+      paintTimer = null;
     }
 
     if (progressTimer) {
@@ -1989,8 +2030,8 @@ async function exportTimeline() {
     if (progressTimer) {
       clearInterval(progressTimer);
     }
-    if (paintRaf) {
-      cancelAnimationFrame(paintRaf);
+    if (paintTimer) {
+      clearTimeout(paintTimer);
     }
     stopTimelinePlayback();
     if (error && error.message === "EXPORT_TIMEOUT") {
@@ -2002,8 +2043,8 @@ async function exportTimeline() {
     if (progressTimer) {
       clearInterval(progressTimer);
     }
-    if (paintRaf) {
-      cancelAnimationFrame(paintRaf);
+    if (paintTimer) {
+      clearTimeout(paintTimer);
     }
     setExportingState(false);
   }
@@ -3207,6 +3248,8 @@ clearKeys.addEventListener("click", () => {
 addTrack("video");
 addTrack("audio");
 addTextTrack();
+videoPreview.setAttribute("playsinline", "");
+videoPreview.setAttribute("webkit-playsinline", "");
 setPreviewMode("video");
 renderTimeline();
 renderMediaBin();

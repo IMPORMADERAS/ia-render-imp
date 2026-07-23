@@ -675,3 +675,103 @@ input[type="range"] {
     max-height: none;
   }
 }
+
+@media (max-width: 900px) {
+  .topbar {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 14px;
+  }
+
+  .topbar-actions {
+    width: 100%;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .topbar-actions button,
+  .topbar-actions .import-btn,
+  .topbar-actions .export-preset,
+  .topbar-actions .export-status {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .topbar-actions .export-status {
+    text-align: center;
+  }
+
+  h1 {
+    font-size: 1.55rem;
+  }
+
+  .workspace {
+    padding: 0 10px 14px;
+    gap: 10px;
+  }
+
+  .timeline-actions {
+    flex-wrap: wrap;
+  }
+
+  .timeline-actions button {
+    flex: 1 1 48%;
+  }
+
+  .transport {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-areas:
+      "stop play pause"
+      "time time time"
+      "range range range";
+    gap: 8px;
+  }
+
+  #stopBtn {
+    grid-area: stop;
+  }
+
+  #playPause {
+    grid-area: play;
+  }
+
+  #pauseBtn {
+    grid-area: pause;
+  }
+
+  #timeDisplay {
+    grid-area: time;
+    text-align: center;
+    white-space: nowrap;
+  }
+
+  #playhead {
+    grid-area: range;
+    width: 100%;
+    min-width: 0;
+  }
+}
+
+@media (max-width: 520px) {
+  .topbar-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .topbar-actions button,
+  .topbar-actions .import-btn,
+  .topbar-actions .export-preset,
+  .topbar-actions .export-status {
+    font-size: 0.84rem;
+  }
+
+  .transport button {
+    padding: 8px 10px;
+    font-size: 0.78rem;
+  }
+
+  #timeDisplay {
+    font-size: 0.95rem;
+  }
+}
