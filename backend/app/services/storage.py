@@ -4,6 +4,15 @@ from pathlib import Path
 from typing import Any
 
 from ..config import settings
+from .object_storage import delete_file as delete_remote_file, get_download_url as get_remote_download_url
+from .postgres_mirror import (
+    get_generation_record as pg_get_generation_record,
+    get_next_job_sequence as pg_get_next_job_sequence,
+    init_postgres_mirror_schema,
+    list_generation_records as pg_list_generation_records,
+    mirror_upsert_generation_record,
+)
+from .primary_router import should_read_from_postgres, sqlite_fallback_enabled
 
 
 DB_PATH = Path(settings.data_dir) / "generations.db"
@@ -31,6 +40,17 @@ def _record_index_fields(payload: dict[str, Any]) -> tuple[int, str]:
 def _upsert_record(table: str, record_id: str, payload: dict[str, Any]) -> None:
     user_id, updated_at = _record_index_fields(payload)
     payload_json = json.dumps(payload, ensure_ascii=False)
+    use_postgres_primary = should_read_from_postgres("jobs", record_id)
+
+    if use_postgres_primary:
+        try:
+            mirror_upsert_generation_record(table, str(record_id), int(user_id), str(updated_at), payload)
+            if not sqlite_fallback_enabled():
+                return
+        except Exception:
+            if not sqlite_fallback_enabled():
+                raise
+
     with _get_conn() as conn:
         conn.execute(
             f"""
@@ -43,6 +63,12 @@ def _upsert_record(table: str, record_id: str, payload: dict[str, Any]) -> None:
             """,
             (str(record_id), user_id, updated_at, payload_json),
         )
+
+    if not use_postgres_primary:
+        try:
+            mirror_upsert_generation_record(table, str(record_id), int(user_id), str(updated_at), payload)
+        except Exception:
+            pass
 
 
 def _get_record(table: str, record_id: str) -> dict[str, Any] | None:
@@ -95,6 +121,11 @@ def _migrate_legacy_json_file(table: str, file_path: Path) -> None:
 
 
 def init_generation_storage_db() -> None:
+    try:
+        init_postgres_mirror_schema()
+    except Exception:
+        pass
+
     with _get_conn() as conn:
         conn.executescript(
             """
@@ -165,10 +196,31 @@ def update_job(job_id: str, updates: dict[str, Any]) -> None:
 
 
 def get_job(job_id: str) -> dict[str, Any] | None:
+    if should_read_from_postgres("jobs", job_id):
+        try:
+            payload = pg_get_generation_record("jobs", str(job_id))
+            if payload is not None:
+                return payload
+            if not sqlite_fallback_enabled():
+                return None
+        except Exception:
+            if not sqlite_fallback_enabled():
+                return None
     return _get_record("jobs", job_id)
 
 
 def get_next_sequence() -> int:
+    if should_read_from_postgres("jobs", "next-sequence"):
+        try:
+            seq = pg_get_next_job_sequence()
+            if seq is not None:
+                return int(seq)
+            if not sqlite_fallback_enabled():
+                return 1
+        except Exception:
+            if not sqlite_fallback_enabled():
+                return 1
+
     max_seq = 0
     for _, payload in _iter_records("jobs"):
         try:
@@ -193,6 +245,16 @@ def update_anim(anim_id: str, updates: dict[str, Any]) -> None:
 
 
 def get_anim(anim_id: str) -> dict[str, Any] | None:
+    if should_read_from_postgres("jobs", anim_id):
+        try:
+            payload = pg_get_generation_record("anims", str(anim_id))
+            if payload is not None:
+                return payload
+            if not sqlite_fallback_enabled():
+                return None
+        except Exception:
+            if not sqlite_fallback_enabled():
+                return None
     return _get_record("anims", anim_id)
 
 
@@ -209,6 +271,16 @@ def update_music(music_id: str, updates: dict[str, Any]) -> None:
 
 
 def get_music(music_id: str) -> dict[str, Any] | None:
+    if should_read_from_postgres("jobs", music_id):
+        try:
+            payload = pg_get_generation_record("music_jobs", str(music_id))
+            if payload is not None:
+                return payload
+            if not sqlite_fallback_enabled():
+                return None
+        except Exception:
+            if not sqlite_fallback_enabled():
+                return None
     return _get_record("music_jobs", music_id)
 
 
@@ -217,6 +289,101 @@ def list_user_generation_history(user_id: int, limit: int = 100) -> list[dict[st
     uid = int(user_id)
 
     items: list[dict[str, Any]] = []
+
+    if should_read_from_postgres("jobs", uid):
+        try:
+            job_records = pg_list_generation_records("jobs", uid, limit=safe_limit)
+            anim_records = pg_list_generation_records("anims", uid, limit=safe_limit)
+            music_records = pg_list_generation_records("music_jobs", uid, limit=safe_limit)
+        except Exception:
+            if not sqlite_fallback_enabled():
+                return []
+            job_records = []
+            anim_records = []
+            music_records = []
+
+        if job_records or anim_records or music_records or not sqlite_fallback_enabled():
+            for job_id, payload in job_records:
+                if int(payload.get("billed_user_id") or 0) != uid:
+                    continue
+
+                module = "img2img"
+                if payload.get("material_names"):
+                    module = "materials"
+                elif not payload.get("input_image"):
+                    module = "text2img"
+
+                out_path = str(payload.get("output_image") or "")
+                has_file = bool(out_path and Path(out_path).exists())
+
+                items.append(
+                    {
+                        "id": str(job_id),
+                        "output_type": "job",
+                        "has_file": has_file,
+                        "module": module,
+                        "status": str(payload.get("status") or "unknown"),
+                        "amount_cop": int(payload.get("billed_amount_cop") or 0),
+                        "created_at": str(payload.get("started_at") or payload.get("updated_at") or ""),
+                        "updated_at": str(payload.get("updated_at") or ""),
+                        "meta": {
+                            "sequence": payload.get("sequence"),
+                            "prompt": payload.get("prompt"),
+                        },
+                    }
+                )
+
+            for anim_id, payload in anim_records:
+                if int(payload.get("billed_user_id") or 0) != uid:
+                    continue
+
+                module = "influencer" if str(payload.get("kind") or "") == "influencer" else "img2vid"
+                vid_path = str(payload.get("video_output") or "")
+                has_file = bool(vid_path and Path(vid_path).exists())
+
+                items.append(
+                    {
+                        "id": str(anim_id),
+                        "output_type": "anim",
+                        "has_file": has_file,
+                        "module": module,
+                        "status": str(payload.get("status") or "unknown"),
+                        "amount_cop": int(payload.get("billed_amount_cop") or 0),
+                        "created_at": str(payload.get("started_at") or payload.get("updated_at") or ""),
+                        "updated_at": str(payload.get("updated_at") or ""),
+                        "meta": {
+                            "duration_seconds": payload.get("duration_seconds"),
+                            "model": payload.get("model"),
+                        },
+                    }
+                )
+
+            for music_id, payload in music_records:
+                if int(payload.get("billed_user_id") or 0) != uid:
+                    continue
+
+                aud_path = str(payload.get("audio_output") or "")
+                has_file = bool(aud_path and Path(aud_path).exists())
+
+                items.append(
+                    {
+                        "id": str(music_id),
+                        "output_type": "music",
+                        "has_file": has_file,
+                        "module": "music",
+                        "status": str(payload.get("status") or "unknown"),
+                        "amount_cop": int(payload.get("billed_amount_cop") or 0),
+                        "created_at": str(payload.get("started_at") or payload.get("updated_at") or ""),
+                        "updated_at": str(payload.get("updated_at") or ""),
+                        "meta": {
+                            "duration_seconds": payload.get("duration_seconds"),
+                            "mode": payload.get("mode"),
+                        },
+                    }
+                )
+
+            items.sort(key=lambda x: str(x.get("updated_at") or x.get("created_at") or ""), reverse=True)
+            return items[:safe_limit]
 
     for job_id, payload in _iter_records("jobs", user_id=uid):
         if int(payload.get("billed_user_id") or 0) != uid:
@@ -357,6 +524,46 @@ def get_user_generation_download(user_id: int, output_type: str, output_id: str)
     raise ValueError("Tipo de generacion invalido")
 
 
+def get_record_download_target(record: dict[str, Any], output_type: str, output_id: str) -> dict[str, Any]:
+    safe_type = str(output_type).strip().lower()
+
+    if safe_type == "job":
+        raw_path = str(record.get("output_image") or "")
+        storage_key = str(record.get("output_storage_key") or "")
+        storage_url = str(record.get("output_storage_url") or "")
+        seq = record.get("sequence") or str(output_id)[:8]
+        filename = f"IA-IMP-{seq}{Path(raw_path).suffix or '.png'}"
+        media_type = "application/octet-stream"
+        if raw_path:
+            media_type = mimetypes.guess_type(raw_path)[0] or media_type
+        return {"local_path": raw_path, "storage_key": storage_key, "storage_url": storage_url, "filename": filename, "media_type": media_type}
+
+    if safe_type == "anim":
+        raw_path = str(record.get("video_output") or "")
+        storage_key = str(record.get("video_storage_key") or "")
+        storage_url = str(record.get("video_storage_url") or "")
+        return {"local_path": raw_path, "storage_key": storage_key, "storage_url": storage_url, "filename": f"IA-IMP-video-{str(output_id)[:8]}.mp4", "media_type": "video/mp4"}
+
+    if safe_type == "music":
+        raw_path = str(record.get("audio_output") or "")
+        storage_key = str(record.get("audio_storage_key") or "")
+        storage_url = str(record.get("audio_storage_url") or "")
+        mode = str(record.get("mode") or "music")
+        return {"local_path": raw_path, "storage_key": storage_key, "storage_url": storage_url, "filename": f"IA-IMP-{mode}-{str(output_id)[:8]}.mp3", "media_type": "audio/mpeg"}
+
+    raise ValueError("Tipo de generacion invalido")
+
+
+def resolve_download_url(storage_key: str, storage_url: str) -> str:
+    safe_url = str(storage_url or "").strip()
+    if safe_url:
+        return safe_url
+    safe_key = str(storage_key or "").strip()
+    if safe_key:
+        return get_remote_download_url(safe_key)
+    return ""
+
+
 def _safe_unlink(path_value: Any) -> bool:
     raw = str(path_value or "").strip()
     if not raw:
@@ -371,6 +578,17 @@ def _safe_unlink(path_value: Any) -> bool:
         return False
 
     return False
+
+
+def _safe_remote_delete(storage_key: Any) -> bool:
+    raw = str(storage_key or "").strip()
+    if not raw:
+        return False
+    try:
+        delete_remote_file(raw)
+        return True
+    except Exception:
+        return False
 
 
 def delete_user_generation_data(user_id: int) -> dict[str, int]:
@@ -389,6 +607,7 @@ def delete_user_generation_data(user_id: int) -> dict[str, int]:
         deleted_jobs += 1
         deleted_files += int(_safe_unlink(payload.get("input_image")))
         deleted_files += int(_safe_unlink(payload.get("output_image")))
+        deleted_files += int(_safe_remote_delete(payload.get("output_storage_key")))
 
     with _get_conn() as conn:
         conn.execute("DELETE FROM jobs WHERE user_id = ?", (uid,))
@@ -402,6 +621,7 @@ def delete_user_generation_data(user_id: int) -> dict[str, int]:
         deleted_files += int(_safe_unlink(payload.get("source_image")))
         deleted_files += int(_safe_unlink(payload.get("source_video")))
         deleted_files += int(_safe_unlink(payload.get("video_output")))
+        deleted_files += int(_safe_remote_delete(payload.get("video_storage_key")))
 
     with _get_conn() as conn:
         conn.execute("DELETE FROM anims WHERE user_id = ?", (uid,))
@@ -413,6 +633,7 @@ def delete_user_generation_data(user_id: int) -> dict[str, int]:
 
         deleted_music += 1
         deleted_files += int(_safe_unlink(payload.get("audio_output")))
+        deleted_files += int(_safe_remote_delete(payload.get("audio_storage_key")))
 
     with _get_conn() as conn:
         conn.execute("DELETE FROM music_jobs WHERE user_id = ?", (uid,))

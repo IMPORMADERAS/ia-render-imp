@@ -13,6 +13,22 @@ const adminPricingSave = document.getElementById("admin-pricing-save");
 const adminPricingStatus = document.getElementById("admin-pricing-status");
 const adminPricingAdvancedToggle = document.getElementById("admin-pricing-advanced-toggle");
 const adminPricingAdvanced = document.getElementById("admin-pricing-advanced");
+const infraOverallChip = document.getElementById("infra-overall-chip");
+const infraHealthChip = document.getElementById("infra-health-chip");
+const infraRedisStatus = document.getElementById("infra-redis-status");
+const infraQueueStatus = document.getElementById("infra-queue-status");
+const infraTotalBacklog = document.getElementById("infra-total-backlog");
+const infraPostgresStatus = document.getElementById("infra-postgres-status");
+const infraQueuesBody = document.getElementById("infra-queues-body");
+const infraCutoverCards = document.getElementById("infra-cutover-cards");
+const infraConsistencyBody = document.getElementById("infra-consistency-body");
+const infraConsistencyChip = document.getElementById("infra-consistency-chip");
+const infraStatus = document.getElementById("infra-status");
+const infraMetricsBody = document.getElementById("infra-metrics-body");
+const infraMetricsChip = document.getElementById("infra-metrics-chip");
+const infraAdviceChip = document.getElementById("infra-advice-chip");
+const infraAdviceSummary = document.getElementById("infra-advice-summary");
+const infraAdviceCards = document.getElementById("infra-advice-cards");
 
 const priceImg2img = document.getElementById("price-img2img");
 const priceMaterials = document.getElementById("price-materials");
@@ -64,6 +80,7 @@ let usersCache = [];
 let selectedUserId = null;
 let selectedUserDetail = null;
 let pricingCache = null;
+let infraCache = null;
 
 function formatCop(value) {
   const amount = Number(value || 0);
@@ -105,6 +122,12 @@ function setPricingStatus(text, state = "idle") {
   adminPricingStatus.dataset.state = state;
 }
 
+function setInfraStatus(text, state = "idle") {
+  if (!infraStatus) return;
+  infraStatus.textContent = text;
+  infraStatus.dataset.state = state;
+}
+
 function formatPricingJson(pricing) {
   return JSON.stringify(pricing || {}, null, 2);
 }
@@ -143,6 +166,205 @@ function setInputValue(el, value) {
 
 function parseCopInput(el) {
   return Math.max(0, Math.round(safeNumber(el?.value, 0)));
+}
+
+function statusLabel(ok, positive = "Operativo", negative = "Atención") {
+  return ok ? positive : negative;
+}
+
+function coverageLabel(value) {
+  const numeric = Number(value || 0);
+  if (!Number.isFinite(numeric)) return "0%";
+  return `${numeric.toFixed(numeric % 1 === 0 ? 0 : 2)}%`;
+}
+
+function renderQueuesTable(queues) {
+  if (!infraQueuesBody) return;
+  infraQueuesBody.innerHTML = "";
+
+  const rows = Array.isArray(queues) ? queues : [];
+  if (!rows.length) {
+    const row = document.createElement("tr");
+    row.innerHTML = '<td colspan="5">No hay colas reportadas.</td>';
+    infraQueuesBody.appendChild(row);
+    return;
+  }
+
+  for (const item of rows) {
+    const row = document.createElement("tr");
+    row.innerHTML = `
+      <td>${item.name || "-"}</td>
+      <td>${Number(item.queued || 0)}</td>
+      <td>${Number(item.started || 0)}</td>
+      <td>${Number(item.failed || 0)}</td>
+      <td>${Number(item.scheduled || 0)}</td>
+    `;
+    infraQueuesBody.appendChild(row);
+  }
+}
+
+function renderCutoverCards(modules) {
+  if (!infraCutoverCards) return;
+  infraCutoverCards.innerHTML = "";
+
+  const rows = Array.isArray(modules) ? modules : [];
+  if (!rows.length) {
+    infraCutoverCards.innerHTML = '<div class="detail-empty">No hay configuración de cutover disponible.</div>';
+    return;
+  }
+
+  for (const item of rows) {
+    const article = document.createElement("article");
+    article.className = "cutover-card";
+    const enabled = Boolean(item.enabled);
+    const percent = Number(item.percent || 0);
+    const fallback = Boolean(item.sqlite_fallback_enabled);
+    article.innerHTML = `
+      <div class="cutover-card__head">
+        <strong>${item.module || "modulo"}</strong>
+        <span class="badge ${enabled ? "badge--ok" : "badge--muted"}">${enabled ? "Activo" : "Apagado"}</span>
+      </div>
+      <div class="cutover-meter">
+        <div class="cutover-meter__bar"><span style="width:${Math.max(0, Math.min(100, percent))}%"></span></div>
+        <span>${percent}%</span>
+      </div>
+      <p class="admin-note">Fallback SQLite: ${fallback ? "habilitado" : "deshabilitado"}</p>
+    `;
+    infraCutoverCards.appendChild(article);
+  }
+}
+
+function renderConsistencyTable(metrics) {
+  if (!infraConsistencyBody) return;
+  infraConsistencyBody.innerHTML = "";
+
+  const entries = Object.entries(metrics || {});
+  if (!entries.length) {
+    const row = document.createElement("tr");
+    row.innerHTML = '<td colspan="5">No hay métricas de consistencia disponibles.</td>';
+    infraConsistencyBody.appendChild(row);
+    return;
+  }
+
+  for (const [name, item] of entries) {
+    const match = Boolean(item?.match);
+    const row = document.createElement("tr");
+    row.innerHTML = `
+      <td>${name}</td>
+      <td>${Number(item?.sqlite || 0)}</td>
+      <td>${Number(item?.postgres || 0)}</td>
+      <td>${coverageLabel(item?.coverage_pct)}</td>
+      <td><span class="badge ${match ? "badge--ok" : "badge--warn"}">${match ? "Verde" : "Revisar"}</span></td>
+    `;
+    infraConsistencyBody.appendChild(row);
+  }
+}
+
+function renderMetricsTable(items) {
+  if (!infraMetricsBody) return;
+  infraMetricsBody.innerHTML = "";
+
+  const rows = Array.isArray(items) ? items : [];
+  if (!rows.length) {
+    const row = document.createElement("tr");
+    row.innerHTML = '<td colspan="9">No hay métricas operativas disponibles todavía.</td>';
+    infraMetricsBody.appendChild(row);
+    return;
+  }
+
+  for (const item of rows) {
+    const row = document.createElement("tr");
+    row.innerHTML = `
+      <td>${item.module || "-"}</td>
+      <td>${Number(item.api_requests_total || 0)}</td>
+      <td>${Number(item.api_avg_duration_ms || 0).toFixed(2)}</td>
+      <td>${Number(item.api_errors_5xx || 0)}</td>
+      <td>${Number(item.jobs_total || 0)}</td>
+      <td>${Number(item.jobs_completed || 0)}</td>
+      <td>${Number(item.jobs_failed || 0)}</td>
+      <td>${Number(item.jobs_rejected || 0)}</td>
+      <td>${Number(item.job_avg_duration_seconds || 0).toFixed(2)}</td>
+    `;
+    infraMetricsBody.appendChild(row);
+  }
+}
+
+function renderAdviceCards(items, summary) {
+  if (infraAdviceSummary) {
+    infraAdviceSummary.textContent = summary || "Sin evaluación.";
+  }
+  if (!infraAdviceCards) return;
+  infraAdviceCards.innerHTML = "";
+
+  const rows = Array.isArray(items) ? items : [];
+  if (!rows.length) {
+    infraAdviceCards.innerHTML = '<div class="detail-empty">No hay recomendaciones disponibles.</div>';
+    return;
+  }
+
+  for (const item of rows) {
+    const toneClass = item.status === "critical" ? "badge--warn" : item.status === "warn" ? "badge--warn" : "badge--ok";
+    const article = document.createElement("article");
+    article.className = "cutover-card";
+    article.innerHTML = `
+      <div class="cutover-card__head">
+        <strong>${item.module || "modulo"}</strong>
+        <span class="badge ${toneClass}">${item.status || "ok"}</span>
+      </div>
+      <p class="admin-note"><strong>Acción:</strong> ${item.action || "Mantener"}</p>
+      <p class="admin-note">Backlog: ${Number(item.backlog || 0)} · Latencia: ${Number(item.latency_ms || 0).toFixed(2)} ms · Rechazos: ${Number(item.rejections || 0)}</p>
+      <p class="admin-note">${Array.isArray(item.reasons) ? item.reasons.join(" | ") : ""}</p>
+    `;
+    infraAdviceCards.appendChild(article);
+  }
+}
+
+function renderInfrastructure(payload) {
+  infraCache = payload || {};
+  const health = infraCache.health || {};
+  const queue = health.queue || {};
+  const postgres = health.postgres_mirror || {};
+  const cutoverModules = infraCache.cutover?.modules || [];
+  const consistency = infraCache.consistency || {};
+  const metrics = infraCache.metrics || {};
+  const advice = infraCache.advice || {};
+  const consistencyOk = Boolean(consistency.ok);
+  const healthOk = Boolean(health.ok);
+
+  if (infraOverallChip) {
+    infraOverallChip.textContent = healthOk && consistencyOk ? "Infra en verde" : healthOk ? "Operativa con revisión" : "Atención requerida";
+  }
+  if (infraHealthChip) {
+    infraHealthChip.textContent = statusLabel(healthOk, "Operativa", "Incidencias");
+  }
+  if (infraRedisStatus) {
+    infraRedisStatus.textContent = statusLabel(Boolean(queue.redis_ok), "OK", "Fallo");
+  }
+  if (infraQueueStatus) {
+    infraQueueStatus.textContent = statusLabel(Boolean(queue.queue_enabled), "Distribuida", "Fallback local");
+  }
+  if (infraTotalBacklog) {
+    infraTotalBacklog.textContent = String(Number(queue.total_backlog || 0));
+  }
+  if (infraPostgresStatus) {
+    infraPostgresStatus.textContent = statusLabel(Boolean(postgres.ok), "OK", "Pendiente");
+  }
+  if (infraConsistencyChip) {
+    infraConsistencyChip.textContent = consistencyOk ? "Verde" : "Revisión necesaria";
+  }
+  if (infraMetricsChip) {
+    infraMetricsChip.textContent = Array.isArray(metrics.modules) && metrics.modules.length ? "Activo" : "Sin tráfico";
+  }
+  if (infraAdviceChip) {
+    infraAdviceChip.textContent = advice.status === "critical" ? "Crítico" : advice.status === "warn" ? "Precaución" : "Estable";
+  }
+
+  renderQueuesTable(queue.queues || []);
+  renderCutoverCards(cutoverModules);
+  renderConsistencyTable(consistency.metrics || {});
+  renderMetricsTable(metrics.modules || []);
+  renderAdviceCards(advice.modules || [], advice.summary || "");
+  setInfraStatus("Infraestructura actualizada.", "completed");
 }
 
 function fillCopPricingForm(pricing) {
@@ -467,6 +689,42 @@ async function loadPricing() {
   setPricingStatus("Configuración cargada.", "completed");
 }
 
+async function loadInfrastructure() {
+  const [healthResponse, cutoverResponse, consistencyResponse, metricsResponse, adviceResponse] = await Promise.all([
+    fetch("/admin-api/infra/health"),
+    fetch("/admin-api/infra/cutover"),
+    fetch("/admin-api/infra/consistency"),
+    fetch("/admin-api/infra/metrics"),
+    fetch("/admin-api/infra/advice"),
+  ]);
+
+  if (!healthResponse.ok) {
+    throw new Error(await readApiError(healthResponse));
+  }
+  if (!cutoverResponse.ok) {
+    throw new Error(await readApiError(cutoverResponse));
+  }
+  if (!consistencyResponse.ok) {
+    throw new Error(await readApiError(consistencyResponse));
+  }
+  if (!metricsResponse.ok) {
+    throw new Error(await readApiError(metricsResponse));
+  }
+  if (!adviceResponse.ok) {
+    throw new Error(await readApiError(adviceResponse));
+  }
+
+  const [health, cutover, consistency, metrics, advice] = await Promise.all([
+    healthResponse.json(),
+    cutoverResponse.json(),
+    consistencyResponse.json(),
+    metricsResponse.json(),
+    adviceResponse.json(),
+  ]);
+
+  renderInfrastructure({ health, cutover, consistency, metrics, advice });
+}
+
 async function refreshPricing() {
   setPricingStatus("Cargando configuración de precios...", "processing");
   try {
@@ -509,7 +767,8 @@ async function refreshAll() {
       adminSessionChip.hidden = false;
       adminSessionChip.textContent = adminSession?.username ? `Admin: ${adminSession.username}` : "Sesión activa";
     }
-    await Promise.all([loadUsers(), loadPricing()]);
+    setInfraStatus("Cargando infraestructura...", "processing");
+    await Promise.all([loadUsers(), loadPricing(), loadInfrastructure()]);
   } catch {
     adminSession = null;
     setDashboardVisible(false);

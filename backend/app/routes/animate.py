@@ -4,12 +4,15 @@ from uuid import uuid4
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
+from fastapi.responses import RedirectResponse
 
 from ..config import settings
-from ..services.animator import animator
+from ..services.admission_control import enforce_generation_capacity, release_generation_slot, reserve_generation_slot
 from ..services.storage import create_anim, get_anim, get_job, update_anim
 from ..services.auth_wallet import AuthenticatedUser, InsufficientBalanceError, credit_balance, debit_balance, require_authenticated_user
 from ..services.billing import module_cost_i2v_cop
+from ..services.queue import QueueUnavailableError, enqueue_or_background
+from ..services.worker_tasks import run_animation_job
 
 router = APIRouter(prefix="/animate", tags=["animate"])
 
@@ -40,111 +43,95 @@ async def start_animation(
     user: AuthenticatedUser = Depends(require_authenticated_user),
 ):
     image_path: str | None = None
+    enforce_generation_capacity("video", user.user_id)
+    reserve_generation_slot("video", user.user_id)
 
-    if file is not None:
-        if not file.content_type or not file.content_type.startswith("image/"):
-            raise HTTPException(status_code=400, detail="El archivo debe ser una imagen")
-
-        ext = Path(file.filename or "anim_input.png").suffix.lower() or ".png"
-        if ext == ".jpeg":
-            ext = ".jpg"
-        if ext not in {".png", ".jpg", ".webp"}:
-            ext = ".png"
-
-        source_path = Path(settings.input_dir) / f"anim-{uuid4()}{ext}"
-        source_path.parent.mkdir(parents=True, exist_ok=True)
-        content = await file.read()
-        source_path.write_bytes(content)
-        image_path = str(source_path)
-    else:
-        if not job_id:
-            raise HTTPException(status_code=400, detail="Debes enviar job_id o una imagen")
-
-        job = get_job(job_id)
-        if job is None:
-            raise HTTPException(status_code=404, detail="Job de render no encontrado")
-        if job.get("status") != "completed":
-            raise HTTPException(status_code=409, detail="El render aun no esta completado")
-
-        output_image_path = job.get("output_image")
-        if not output_image_path or not Path(output_image_path).exists():
-            raise HTTPException(status_code=404, detail="Imagen de salida no disponible en disco")
-
-        image_path = output_image_path
-
-    requested_model = (model or "").strip()
-    selected_model = requested_model if requested_model in SUPPORTED_I2V_MODELS else DEFAULT_I2V_MODEL
-
-    anim_id = str(uuid4())
-    VIDEO_DIR.mkdir(parents=True, exist_ok=True)
-    output_video_path = VIDEO_DIR / f"{anim_id}.mp4"
-
-    requested_duration = max(3, min(15, int(duration_seconds)))
-    billed_amount = module_cost_i2v_cop(selected_model, requested_duration)
     try:
-        balance_after = debit_balance(user.user_id, billed_amount, "img2vid", f"Animacion {anim_id}")
-    except InsufficientBalanceError as exc:
-        raise HTTPException(status_code=402, detail="Saldo insuficiente. Recarga tu cuenta para generar video.") from exc
+        if file is not None:
+            if not file.content_type or not file.content_type.startswith("image/"):
+                raise HTTPException(status_code=400, detail="El archivo debe ser una imagen")
 
-    create_anim(
-        anim_id,
-        {
-            "anim_id": anim_id,
-            "job_id": job_id,
-            "status": "queued",
-            "prompt": prompt,
-            "model": selected_model,
-            "duration_seconds": requested_duration,
-            "source_image": image_path,
-            "video_output": None,
-            "error": None,
-            "stage": "En cola",
-            "progress": 0,
-            "started_at": None,
-            "completed_at": None,
-            "updated_at": _utc(),
-            "billed_user_id": user.user_id,
-            "billed_amount_cop": billed_amount,
-            "balance_after_debit": balance_after,
-        },
-    )
+            ext = Path(file.filename or "anim_input.png").suffix.lower() or ".png"
+            if ext == ".jpeg":
+                ext = ".jpg"
+            if ext not in {".png", ".jpg", ".webp"}:
+                ext = ".png"
 
-    def run_animation() -> None:
+            source_path = Path(settings.input_dir) / f"anim-{uuid4()}{ext}"
+            source_path.parent.mkdir(parents=True, exist_ok=True)
+            content = await file.read()
+            source_path.write_bytes(content)
+            image_path = str(source_path)
+        else:
+            if not job_id:
+                raise HTTPException(status_code=400, detail="Debes enviar job_id o una imagen")
+
+            job = get_job(job_id)
+            if job is None:
+                raise HTTPException(status_code=404, detail="Job de render no encontrado")
+            if job.get("status") != "completed":
+                raise HTTPException(status_code=409, detail="El render aun no esta completado")
+
+            output_image_path = job.get("output_image")
+            if not output_image_path or not Path(output_image_path).exists():
+                raise HTTPException(status_code=404, detail="Imagen de salida no disponible en disco")
+
+            image_path = output_image_path
+
+        requested_model = (model or "").strip()
+        selected_model = requested_model if requested_model in SUPPORTED_I2V_MODELS else DEFAULT_I2V_MODEL
+
+        anim_id = str(uuid4())
+        VIDEO_DIR.mkdir(parents=True, exist_ok=True)
+        output_video_path = VIDEO_DIR / f"{anim_id}.mp4"
+
+        requested_duration = max(3, min(15, int(duration_seconds)))
+        billed_amount = module_cost_i2v_cop(selected_model, requested_duration)
         try:
-            update_anim(
-                anim_id,
-                {
-                    "status": "processing",
-                    "stage": "Generando video",
-                    "progress": 15,
-                    "started_at": _utc(),
-                    "updated_at": _utc(),
-                },
-            )
+            balance_after = debit_balance(user.user_id, billed_amount, "img2vid", f"Animacion {anim_id}")
+        except InsufficientBalanceError as exc:
+            raise HTTPException(status_code=402, detail="Saldo insuficiente. Recarga tu cuenta para generar video.") from exc
 
-            result = animator.animate_replicate(
-                image_path=image_path,
+        create_anim(
+            anim_id,
+            {
+                "anim_id": anim_id,
+                "job_id": job_id,
+                "status": "queued",
+                "prompt": prompt,
+                "model": selected_model,
+                "duration_seconds": requested_duration,
+                "source_image": image_path,
+                "video_output": None,
+                "error": None,
+                "stage": "En cola",
+                "progress": 0,
+                "started_at": None,
+                "completed_at": None,
+                "updated_at": _utc(),
+                "billed_user_id": user.user_id,
+                "billed_amount_cop": billed_amount,
+                "balance_after_debit": balance_after,
+            },
+        )
+
+        try:
+            queue_task_id = enqueue_or_background(
+                background_tasks,
+                run_animation_job,
+                queue_name="video",
+                anim_id=anim_id,
+                user_id=user.user_id,
+                billed_amount=billed_amount,
+                image_path=str(image_path),
                 output_video_path=str(output_video_path),
                 prompt=prompt,
                 model=selected_model,
                 duration_seconds=requested_duration,
             )
-
-            duration = result.get("duration_seconds", 1)
-            update_anim(
-                anim_id,
-                {
-                    "status": "completed",
-                    "video_output": str(output_video_path),
-                    "progress": 100,
-                    "stage": f"Video listo ({duration}s, clip {requested_duration}s)",
-                    "completed_at": _utc(),
-                    "updated_at": _utc(),
-                },
-            )
-        except Exception as exc:
+        except QueueUnavailableError as exc:
             try:
-                credit_balance(user.user_id, billed_amount, "img2vid_refund", f"Reembolso por fallo anim {anim_id}")
+                credit_balance(user.user_id, billed_amount, "img2vid_refund", f"Reembolso por cola no disponible {anim_id}")
             except Exception:
                 pass
             update_anim(
@@ -152,13 +139,15 @@ async def start_animation(
                 {
                     "status": "failed",
                     "error": str(exc),
-                    "stage": "Fallo en animacion",
+                    "stage": "Cola no disponible",
                     "updated_at": _utc(),
                 },
             )
-
-    background_tasks.add_task(run_animation)
-    return {"anim_id": anim_id, "status": "queued"}
+            raise HTTPException(status_code=503, detail="Cola temporalmente no disponible. Intenta nuevamente en unos minutos.") from exc
+        return {"anim_id": anim_id, "status": "queued", "queue_task_id": queue_task_id}
+    except Exception:
+        release_generation_slot("video", user.user_id)
+        raise
 
 
 @router.get("/{anim_id}", response_model=dict)
@@ -179,6 +168,12 @@ def get_animation_video(anim_id: str):
 
     video_path = anim.get("video_output")
     if not video_path or not Path(video_path).exists():
+        remote_url = str(anim.get("video_storage_url") or "").strip()
+        if not remote_url and anim.get("video_storage_key"):
+            from ..services.storage import resolve_download_url
+            remote_url = resolve_download_url(str(anim.get("video_storage_key") or ""), "")
+        if remote_url:
+            return RedirectResponse(url=remote_url, status_code=307)
         raise HTTPException(status_code=404, detail="Archivo de video no encontrado en disco")
 
     return FileResponse(

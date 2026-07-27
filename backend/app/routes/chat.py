@@ -22,6 +22,7 @@ from ..services.auth_wallet import (
     require_authenticated_user,
 )
 from ..services.billing import module_cost_chat_cop, module_cost_chat_image_cop
+from ..services.queue import get_optional_redis_connection
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 CHAT_EXPORTS_DIR = Path(settings.data_dir) / "chat_exports"
@@ -61,7 +62,8 @@ CONTACT_LINES_RESPONSE = (
 
 WEBSITE_RESPONSE = "La pagina web oficial de IMPORMADERAS es: https://impormaderasltda.com/"
 
-RECENT_ATTACHMENTS_BY_USER: dict[int, list[dict]] = {}
+RECENT_ATTACHMENTS_TTL_SECONDS = 2 * 60 * 60
+_RECENT_ATTACHMENTS_FALLBACK: dict[int, list[dict]] = {}
 
 
 class ChatRequest(BaseModel):
@@ -326,11 +328,37 @@ def _get_ia_imp_default_answer(message: str) -> str | None:
 def _remember_user_attachments(user_id: int, attachments: list[dict]) -> None:
     if not attachments:
         return
-    RECENT_ATTACHMENTS_BY_USER[int(user_id)] = [dict(item) for item in attachments]
+
+    safe_items = [dict(item) for item in attachments]
+    redis_conn = get_optional_redis_connection()
+    if redis_conn is not None:
+        try:
+            key = f"chat:recent_attachments:{int(user_id)}"
+            payload = json.dumps(safe_items, ensure_ascii=False)
+            redis_conn.setex(key, RECENT_ATTACHMENTS_TTL_SECONDS, payload)
+            return
+        except Exception:
+            pass
+
+    # Compatibility fallback when Redis is unavailable.
+    global _RECENT_ATTACHMENTS_FALLBACK
+    _RECENT_ATTACHMENTS_FALLBACK[int(user_id)] = safe_items
 
 
 def _get_user_recent_attachments(user_id: int) -> list[dict]:
-    items = RECENT_ATTACHMENTS_BY_USER.get(int(user_id), [])
+    redis_conn = get_optional_redis_connection()
+    if redis_conn is not None:
+        try:
+            key = f"chat:recent_attachments:{int(user_id)}"
+            raw = redis_conn.get(key)
+            if raw:
+                data = json.loads(raw)
+                if isinstance(data, list):
+                    return [dict(item) for item in data if isinstance(item, dict)]
+        except Exception:
+            pass
+
+    items = _RECENT_ATTACHMENTS_FALLBACK.get(int(user_id), [])
     return [dict(item) for item in items]
 
 

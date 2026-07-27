@@ -1,18 +1,20 @@
-from pathlib import Path
 from datetime import datetime, timezone
-from uuid import uuid4
 import mimetypes
+from pathlib import Path
+from uuid import uuid4
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
+from fastapi.responses import RedirectResponse
 
 from ..config import settings
+from ..services.admission_control import enforce_generation_capacity, release_generation_slot, reserve_generation_slot
 from ..schemas import JobDetail
-from ..services.prompt_builder import build_arch_prompt, sanitize_negative_prompt
-from ..services.renderer import renderer
-from ..services.storage import create_job, get_job, get_next_sequence, update_job
 from ..services.auth_wallet import AuthenticatedUser, InsufficientBalanceError, credit_balance, debit_balance, require_authenticated_user
 from ..services.billing import module_cost_img2img_cop, module_cost_materials_cop, module_cost_text2img_cop
+from ..services.queue import QueueUnavailableError, enqueue_or_background
+from ..services.storage import create_job, get_job, get_next_sequence, get_record_download_target, resolve_download_url, update_job
+from ..services.worker_tasks import run_material_render_job, run_render_job, run_text_render_job
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 
@@ -94,130 +96,86 @@ async def create_render_job(
     if not file.content_type or not file.content_type.startswith("image/"):
         raise HTTPException(status_code=400, detail="El archivo debe ser una imagen.")
 
-    safe_lighting_mode = normalize_lighting_mode(lighting_mode)
+    enforce_generation_capacity("render", user.user_id)
+    reserve_generation_slot("render", user.user_id)
 
-    job_id = str(uuid4())
-    sequence = get_next_sequence()
-    ext = Path(file.filename or "input.png").suffix or ".png"
-    normalized_ext = ext.lower()
-    if normalized_ext == ".jpeg":
-        normalized_ext = ".jpg"
-    if normalized_ext not in {".png", ".jpg", ".webp"}:
-        normalized_ext = ".png"
-
-    input_path = Path(settings.input_dir) / f"{job_id}{ext}"
-    output_path = Path(settings.output_dir) / f"{job_id}{normalized_ext}"
-
-    input_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-
-    content = await file.read()
-    input_path.write_bytes(content)
-
-    billed_amount = module_cost_img2img_cop()
     try:
-        balance_after = debit_balance(user.user_id, billed_amount, "img2img", f"Generacion job {job_id}")
-    except InsufficientBalanceError as exc:
-        raise HTTPException(status_code=402, detail="Saldo insuficiente. Recarga tu cuenta para generar.") from exc
+        safe_lighting_mode = normalize_lighting_mode(lighting_mode)
 
-    create_job(
-        job_id,
-        {
-            "job_id": job_id,
-            "sequence": sequence,
-            "status": "queued",
-            "prompt": prompt,
-            "style": style,
-            "lighting_mode": safe_lighting_mode,
-            "quality": quality,
-            "input_image": str(input_path),
-            "output_image": None,
-            "error": None,
-            "progress": 0,
-            "stage": "En cola",
-            "eta_seconds": 10,
-            "elapsed_seconds": 0,
-            "expected_total_seconds": 10,
-            "model_mode": None,
-            "started_at": None,
-            "completed_at": None,
-            "updated_at": utc_now_iso(),
-            "billed_user_id": user.user_id,
-            "billed_amount_cop": billed_amount,
-            "balance_after_debit": balance_after,
-        },
-    )
+        job_id = str(uuid4())
+        sequence = get_next_sequence()
+        ext = Path(file.filename or "input.png").suffix or ".png"
+        normalized_ext = ext.lower()
+        if normalized_ext == ".jpeg":
+            normalized_ext = ".jpg"
+        if normalized_ext not in {".png", ".jpg", ".webp"}:
+            normalized_ext = ".png"
 
-    def run_render() -> None:
+        input_path = Path(settings.input_dir) / f"{job_id}{ext}"
+        output_path = Path(settings.output_dir) / f"{job_id}{normalized_ext}"
+
+        input_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+
+        content = await file.read()
+        input_path.write_bytes(content)
+
+        billed_amount = module_cost_img2img_cop()
         try:
-            provider = settings.render_provider.lower().strip()
-            base_eta = max(20, int(steps * 1.4))
-            if provider == "replicate":
-                base_eta = max(45, int(steps * 2.0))
+            balance_after = debit_balance(user.user_id, billed_amount, "img2img", f"Generacion job {job_id}")
+        except InsufficientBalanceError as exc:
+            raise HTTPException(status_code=402, detail="Saldo insuficiente. Recarga tu cuenta para generar.") from exc
 
-            started_at = utc_now_iso()
-            update_job(
-                job_id,
-                {
-                    "status": "processing",
-                    "progress": 15,
-                    "stage": "Preparando render",
-                    "eta_seconds": base_eta,
-                    "expected_total_seconds": base_eta,
-                    "started_at": started_at,
-                    "updated_at": utc_now_iso(),
-                },
-            )
+        create_job(
+            job_id,
+            {
+                "job_id": job_id,
+                "sequence": sequence,
+                "status": "queued",
+                "prompt": prompt,
+                "style": style,
+                "lighting_mode": safe_lighting_mode,
+                "quality": quality,
+                "input_image": str(input_path),
+                "output_image": None,
+                "error": None,
+                "progress": 0,
+                "stage": "En cola",
+                "eta_seconds": 10,
+                "elapsed_seconds": 0,
+                "expected_total_seconds": 10,
+                "model_mode": None,
+                "started_at": None,
+                "completed_at": None,
+                "updated_at": utc_now_iso(),
+                "billed_user_id": user.user_id,
+                "billed_amount_cop": billed_amount,
+                "balance_after_debit": balance_after,
+            },
+        )
 
-            full_prompt = build_arch_prompt(prompt, style, safe_lighting_mode)
-            cleaned_negative_prompt = sanitize_negative_prompt(negative_prompt)
-            update_job(
-                job_id,
-                {
-                    "progress": 55,
-                    "stage": f"Renderizando en {provider} ({quality})",
-                    "updated_at": utc_now_iso(),
-                },
-            )
-
-            render_meta = renderer.generate(
+        try:
+            queue_task_id = enqueue_or_background(
+                background_tasks,
+                run_render_job,
+                queue_name="render",
+                job_id=job_id,
+                user_id=user.user_id,
+                billed_amount=billed_amount,
                 input_image_path=str(input_path),
                 output_image_path=str(output_path),
-                prompt=full_prompt,
-                negative_prompt=cleaned_negative_prompt,
+                prompt=prompt,
+                negative_prompt=negative_prompt,
+                style=style,
+                lighting_mode=safe_lighting_mode,
+                quality=quality,
                 steps=steps,
                 guidance_scale=guidance_scale,
-                quality=quality,
                 seed=seed,
-                model_override="black-forest-labs/flux-kontext-pro",
             )
-
-            duration = int(render_meta.get("duration_seconds", 1))
-            mode = str(render_meta.get("mode", "fallback"))
-            warning = render_meta.get("warning")
-            stage = "Completado"
-            if warning:
-                stage = "Completado con fallback local"
-
-            update_job(
-                job_id,
-                {
-                    "status": "completed",
-                    "output_image": str(output_path),
-                    "progress": 100,
-                    "stage": stage,
-                    "eta_seconds": 0,
-                    "elapsed_seconds": duration,
-                    "expected_total_seconds": duration,
-                    "model_mode": mode,
-                    "warning": warning,
-                    "completed_at": utc_now_iso(),
-                    "updated_at": utc_now_iso(),
-                },
-            )
-        except Exception as exc:
+        except QueueUnavailableError as exc:
             try:
-                credit_balance(user.user_id, billed_amount, "img2img_refund", f"Reembolso por fallo job {job_id}")
+                credit_balance(user.user_id, billed_amount, "img2img_refund", f"Reembolso por cola no disponible {job_id}")
             except Exception:
                 pass
             update_job(
@@ -225,15 +183,22 @@ async def create_render_job(
                 {
                     "status": "failed",
                     "error": str(exc),
-                    "stage": "Fallo en render",
-                    "eta_seconds": None,
+                    "stage": "Cola no disponible",
                     "updated_at": utc_now_iso(),
                 },
             )
+            raise HTTPException(status_code=503, detail="Cola temporalmente no disponible. Intenta nuevamente en unos minutos.") from exc
 
-    background_tasks.add_task(run_render)
-
-    return {"job_id": job_id, "sequence": sequence, "status": "queued", "message": "Render en cola"}
+        return {
+            "job_id": job_id,
+            "sequence": sequence,
+            "status": "queued",
+            "message": "Render en cola",
+            "queue_task_id": queue_task_id,
+        }
+    except Exception:
+        release_generation_slot("render", user.user_id)
+        raise
 
 
 @router.post("/render-text", response_model=dict)
@@ -252,107 +217,72 @@ async def create_text_render_job(
     if not prompt.strip():
         raise HTTPException(status_code=400, detail="El prompt es obligatorio")
 
-    safe_lighting_mode = normalize_lighting_mode(lighting_mode)
+    enforce_generation_capacity("render", user.user_id)
+    reserve_generation_slot("render", user.user_id)
 
-    job_id = str(uuid4())
-    sequence = get_next_sequence()
-    output_path = Path(settings.output_dir) / f"{job_id}.png"
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-
-    billed_amount = module_cost_text2img_cop()
     try:
-        balance_after = debit_balance(user.user_id, billed_amount, "text2img", f"Generacion texto job {job_id}")
-    except InsufficientBalanceError as exc:
-        raise HTTPException(status_code=402, detail="Saldo insuficiente. Recarga tu cuenta para generar.") from exc
+        safe_lighting_mode = normalize_lighting_mode(lighting_mode)
 
-    create_job(
-        job_id,
-        {
-            "job_id": job_id,
-            "sequence": sequence,
-            "status": "queued",
-            "prompt": prompt,
-            "style": style,
-            "lighting_mode": safe_lighting_mode,
-            "quality": quality,
-            "input_image": "",
-            "output_image": None,
-            "error": None,
-            "progress": 0,
-            "stage": "En cola",
-            "eta_seconds": 10,
-            "elapsed_seconds": 0,
-            "expected_total_seconds": 10,
-            "model_mode": None,
-            "started_at": None,
-            "completed_at": None,
-            "updated_at": utc_now_iso(),
-            "billed_user_id": user.user_id,
-            "billed_amount_cop": billed_amount,
-            "balance_after_debit": balance_after,
-        },
-    )
+        job_id = str(uuid4())
+        sequence = get_next_sequence()
+        output_path = Path(settings.output_dir) / f"{job_id}.png"
+        output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    def run_render_text() -> None:
+        billed_amount = module_cost_text2img_cop()
         try:
-            started_at = utc_now_iso()
-            base_eta = max(35, int(steps * 1.8))
-            update_job(
-                job_id,
-                {
-                    "status": "processing",
-                    "progress": 15,
-                    "stage": "Preparando texto a imagen",
-                    "eta_seconds": base_eta,
-                    "expected_total_seconds": base_eta,
-                    "started_at": started_at,
-                    "updated_at": utc_now_iso(),
-                },
-            )
+            balance_after = debit_balance(user.user_id, billed_amount, "text2img", f"Generacion texto job {job_id}")
+        except InsufficientBalanceError as exc:
+            raise HTTPException(status_code=402, detail="Saldo insuficiente. Recarga tu cuenta para generar.") from exc
 
-            full_prompt = build_arch_prompt(prompt, style, safe_lighting_mode)
-            cleaned_negative_prompt = sanitize_negative_prompt(negative_prompt)
-            update_job(
-                job_id,
-                {
-                    "progress": 55,
-                    "stage": f"Generando imagen desde texto ({quality})",
-                    "updated_at": utc_now_iso(),
-                },
-            )
+        create_job(
+            job_id,
+            {
+                "job_id": job_id,
+                "sequence": sequence,
+                "status": "queued",
+                "prompt": prompt,
+                "style": style,
+                "lighting_mode": safe_lighting_mode,
+                "quality": quality,
+                "input_image": "",
+                "output_image": None,
+                "error": None,
+                "progress": 0,
+                "stage": "En cola",
+                "eta_seconds": 10,
+                "elapsed_seconds": 0,
+                "expected_total_seconds": 10,
+                "model_mode": None,
+                "started_at": None,
+                "completed_at": None,
+                "updated_at": utc_now_iso(),
+                "billed_user_id": user.user_id,
+                "billed_amount_cop": billed_amount,
+                "balance_after_debit": balance_after,
+            },
+        )
 
-            render_meta = renderer.generate_text_to_image(
+        try:
+            queue_task_id = enqueue_or_background(
+                background_tasks,
+                run_text_render_job,
+                queue_name="render",
+                job_id=job_id,
+                user_id=user.user_id,
+                billed_amount=billed_amount,
                 output_image_path=str(output_path),
-                prompt=full_prompt,
-                negative_prompt=cleaned_negative_prompt,
+                prompt=prompt,
+                negative_prompt=negative_prompt,
+                style=style,
+                lighting_mode=safe_lighting_mode,
+                quality=quality,
                 steps=steps,
                 guidance_scale=guidance_scale,
-                quality=quality,
                 seed=seed,
             )
-
-            duration = int(render_meta.get("duration_seconds", 1))
-            mode = str(render_meta.get("mode", "replicate_text"))
-
-            update_job(
-                job_id,
-                {
-                    "status": "completed",
-                    "output_image": str(output_path),
-                    "progress": 100,
-                    "stage": "Completado",
-                    "eta_seconds": 0,
-                    "elapsed_seconds": duration,
-                    "expected_total_seconds": duration,
-                    "model_mode": mode,
-                    "warning": None,
-                    "completed_at": utc_now_iso(),
-                    "updated_at": utc_now_iso(),
-                },
-            )
-        except Exception as exc:
+        except QueueUnavailableError as exc:
             try:
-                credit_balance(user.user_id, billed_amount, "text2img_refund", f"Reembolso por fallo job {job_id}")
+                credit_balance(user.user_id, billed_amount, "text2img_refund", f"Reembolso por cola no disponible {job_id}")
             except Exception:
                 pass
             update_job(
@@ -360,20 +290,22 @@ async def create_text_render_job(
                 {
                     "status": "failed",
                     "error": str(exc),
-                    "stage": "Fallo en texto a imagen",
-                    "eta_seconds": None,
+                    "stage": "Cola no disponible",
                     "updated_at": utc_now_iso(),
                 },
             )
+            raise HTTPException(status_code=503, detail="Cola temporalmente no disponible. Intenta nuevamente en unos minutos.") from exc
 
-    background_tasks.add_task(run_render_text)
-
-    return {
-        "job_id": job_id,
-        "sequence": sequence,
-        "status": "queued",
-        "message": "Generacion texto a imagen en cola",
-    }
+        return {
+            "job_id": job_id,
+            "sequence": sequence,
+            "status": "queued",
+            "message": "Generacion texto a imagen en cola",
+            "queue_task_id": queue_task_id,
+        }
+    except Exception:
+        release_generation_slot("render", user.user_id)
+        raise
 
 
 @router.post("/render-materials", response_model=dict)
@@ -396,149 +328,100 @@ async def create_material_render_job(
     if not prompt.strip():
         raise HTTPException(status_code=400, detail="El prompt es obligatorio")
 
-    normalized_material_names = _normalize_material_names(material_names)
+    enforce_generation_capacity("render", user.user_id)
+    reserve_generation_slot("render", user.user_id)
 
-    if len(normalized_material_names) < 1 or len(normalized_material_names) > 2:
-        raise HTTPException(status_code=400, detail="Selecciona entre 1 y 2 materiales")
-
-    safe_mode = (material_mode or "mix").strip().lower()
-    if safe_mode not in {"mix", "zones"}:
-        raise HTTPException(status_code=400, detail="material_mode debe ser 'mix' o 'zones'")
-
-    safe_lighting_mode = normalize_lighting_mode(lighting_mode)
-
-    resolved_material_paths = _resolve_material_paths(normalized_material_names)
-
-    job_id = str(uuid4())
-    sequence = get_next_sequence()
-    ext = Path(file.filename or "input.png").suffix or ".png"
-    normalized_ext = ext.lower()
-    if normalized_ext == ".jpeg":
-        normalized_ext = ".jpg"
-    if normalized_ext not in {".png", ".jpg", ".webp"}:
-        normalized_ext = ".png"
-
-    input_path = Path(settings.input_dir) / f"{job_id}{ext}"
-    output_path = Path(settings.output_dir) / f"{job_id}{normalized_ext}"
-
-    input_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-
-    content = await file.read()
-    input_path.write_bytes(content)
-
-    billed_amount = module_cost_materials_cop()
     try:
-        balance_after = debit_balance(user.user_id, billed_amount, "materials", f"Generacion materiales job {job_id}")
-    except InsufficientBalanceError as exc:
-        raise HTTPException(status_code=402, detail="Saldo insuficiente. Recarga tu cuenta para generar.") from exc
+        normalized_material_names = _normalize_material_names(material_names)
 
-    create_job(
-        job_id,
-        {
-            "job_id": job_id,
-            "sequence": sequence,
-            "status": "queued",
-            "prompt": prompt,
-            "style": style,
-            "lighting_mode": safe_lighting_mode,
-            "quality": quality,
-            "input_image": str(input_path),
-            "output_image": None,
-            "material_names": normalized_material_names,
-            "material_mode": safe_mode,
-            "material_plan": material_plan,
-            "error": None,
-            "progress": 0,
-            "stage": "En cola",
-            "eta_seconds": 10,
-            "elapsed_seconds": 0,
-            "expected_total_seconds": 10,
-            "model_mode": None,
-            "started_at": None,
-            "completed_at": None,
-            "updated_at": utc_now_iso(),
-            "billed_user_id": user.user_id,
-            "billed_amount_cop": billed_amount,
-            "balance_after_debit": balance_after,
-        },
-    )
+        if len(normalized_material_names) < 1 or len(normalized_material_names) > 2:
+            raise HTTPException(status_code=400, detail="Selecciona entre 1 y 2 materiales")
 
-    def run_material_render() -> None:
+        safe_mode = (material_mode or "mix").strip().lower()
+        if safe_mode not in {"mix", "zones"}:
+            raise HTTPException(status_code=400, detail="material_mode debe ser 'mix' o 'zones'")
+
+        safe_lighting_mode = normalize_lighting_mode(lighting_mode)
+        resolved_material_paths = _resolve_material_paths(normalized_material_names)
+
+        job_id = str(uuid4())
+        sequence = get_next_sequence()
+        ext = Path(file.filename or "input.png").suffix or ".png"
+        normalized_ext = ext.lower()
+        if normalized_ext == ".jpeg":
+            normalized_ext = ".jpg"
+        if normalized_ext not in {".png", ".jpg", ".webp"}:
+            normalized_ext = ".png"
+
+        input_path = Path(settings.input_dir) / f"{job_id}{ext}"
+        output_path = Path(settings.output_dir) / f"{job_id}{normalized_ext}"
+
+        input_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+
+        content = await file.read()
+        input_path.write_bytes(content)
+
+        billed_amount = module_cost_materials_cop()
         try:
-            started_at = utc_now_iso()
-            base_eta = 70 if quality == "ultra" else 55
-            update_job(
-                job_id,
-                {
-                    "status": "processing",
-                    "progress": 15,
-                    "stage": "Preparando materiales",
-                    "eta_seconds": base_eta,
-                    "expected_total_seconds": base_eta,
-                    "started_at": started_at,
-                    "updated_at": utc_now_iso(),
-                },
-            )
+            balance_after = debit_balance(user.user_id, billed_amount, "materials", f"Generacion materiales job {job_id}")
+        except InsufficientBalanceError as exc:
+            raise HTTPException(status_code=402, detail="Saldo insuficiente. Recarga tu cuenta para generar.") from exc
 
-            full_prompt = build_arch_prompt(prompt, style, safe_lighting_mode)
-            if safe_mode == "mix":
-                full_prompt = (
-                    f"{full_prompt}. Usa los materiales de referencia para una mezcla equilibrada y realista en superficies arquitectonicas. "
-                    "No alteres geometria, perspectiva ni composicion del modelado. "
-                    "El resultado final debe verse como una fotografia arquitectonica real de un espacio construido, "
-                    "no como render CGI, viewport, ilustracion ni visualizacion conceptual."
-                )
-            else:
-                plan_text = material_plan.strip() or "Distribuye los materiales en zonas coherentes sin alterar la estructura principal"
-                full_prompt = (
-                    f"{full_prompt}. Aplica materiales por zonas segun esta instruccion: {plan_text}. "
-                    "Conserva geometria, escala y encuadre original. "
-                    "El resultado final debe verse como una fotografia arquitectonica real de un espacio construido, "
-                    "no como render CGI, viewport, ilustracion ni visualizacion conceptual."
-                )
+        create_job(
+            job_id,
+            {
+                "job_id": job_id,
+                "sequence": sequence,
+                "status": "queued",
+                "prompt": prompt,
+                "style": style,
+                "lighting_mode": safe_lighting_mode,
+                "quality": quality,
+                "input_image": str(input_path),
+                "output_image": None,
+                "material_names": normalized_material_names,
+                "material_mode": safe_mode,
+                "material_plan": material_plan,
+                "error": None,
+                "progress": 0,
+                "stage": "En cola",
+                "eta_seconds": 10,
+                "elapsed_seconds": 0,
+                "expected_total_seconds": 10,
+                "model_mode": None,
+                "started_at": None,
+                "completed_at": None,
+                "updated_at": utc_now_iso(),
+                "billed_user_id": user.user_id,
+                "billed_amount_cop": billed_amount,
+                "balance_after_debit": balance_after,
+            },
+        )
 
-            update_job(
-                job_id,
-                {
-                    "progress": 55,
-                    "stage": f"Aplicando {len(normalized_material_names)} materiales ({safe_mode})",
-                    "updated_at": utc_now_iso(),
-                },
-            )
-
-            render_meta = renderer.generate_material_edit(
+        try:
+            queue_task_id = enqueue_or_background(
+                background_tasks,
+                run_material_render_job,
+                queue_name="render",
+                job_id=job_id,
+                user_id=user.user_id,
+                billed_amount=billed_amount,
                 input_image_path=str(input_path),
-                material_paths=resolved_material_paths,
                 output_image_path=str(output_path),
-                prompt=full_prompt,
+                prompt=prompt,
+                style=style,
+                lighting_mode=safe_lighting_mode,
+                quality=quality,
                 material_mode=safe_mode,
                 material_plan=material_plan,
                 material_names=normalized_material_names,
-                quality=quality,
+                material_paths=resolved_material_paths,
                 seed=seed,
             )
-
-            duration = int(render_meta.get("duration_seconds", 1))
-            update_job(
-                job_id,
-                {
-                    "status": "completed",
-                    "output_image": str(output_path),
-                    "progress": 100,
-                    "stage": "Completado",
-                    "eta_seconds": 0,
-                    "elapsed_seconds": duration,
-                    "expected_total_seconds": duration,
-                    "model_mode": str(render_meta.get("mode", "replicate_materials")),
-                    "warning": None,
-                    "completed_at": utc_now_iso(),
-                    "updated_at": utc_now_iso(),
-                },
-            )
-        except Exception as exc:
+        except QueueUnavailableError as exc:
             try:
-                credit_balance(user.user_id, billed_amount, "materials_refund", f"Reembolso por fallo job {job_id}")
+                credit_balance(user.user_id, billed_amount, "materials_refund", f"Reembolso por cola no disponible {job_id}")
             except Exception:
                 pass
             update_job(
@@ -546,20 +429,22 @@ async def create_material_render_job(
                 {
                     "status": "failed",
                     "error": str(exc),
-                    "stage": "Fallo en materiales",
-                    "eta_seconds": None,
+                    "stage": "Cola no disponible",
                     "updated_at": utc_now_iso(),
                 },
             )
+            raise HTTPException(status_code=503, detail="Cola temporalmente no disponible. Intenta nuevamente en unos minutos.") from exc
 
-    background_tasks.add_task(run_material_render)
-
-    return {
-        "job_id": job_id,
-        "sequence": sequence,
-        "status": "queued",
-        "message": "Render con materiales en cola",
-    }
+        return {
+            "job_id": job_id,
+            "sequence": sequence,
+            "status": "queued",
+            "message": "Render con materiales en cola",
+            "queue_task_id": queue_task_id,
+        }
+    except Exception:
+        release_generation_slot("render", user.user_id)
+        raise
 
 
 @router.get("/{job_id}", response_model=JobDetail)
@@ -579,11 +464,15 @@ def get_render_image(job_id: str):
         raise HTTPException(status_code=404, detail="Job no encontrado")
 
     image_path = job.get("output_image")
-    if not image_path:
+    if not image_path and not job.get("output_storage_key") and not job.get("output_storage_url"):
         raise HTTPException(status_code=409, detail="Render aun no finaliza")
 
-    path = Path(image_path)
-    if not path.exists():
+    path = Path(image_path) if image_path else None
+    if not path or not path.exists():
+        target = get_record_download_target(job, "job", job_id)
+        remote_url = resolve_download_url(target.get("storage_key") or "", target.get("storage_url") or "")
+        if remote_url:
+            return RedirectResponse(url=remote_url, status_code=307)
         raise HTTPException(status_code=404, detail="Imagen no disponible")
 
     sequence = ensure_job_sequence(job_id, job)

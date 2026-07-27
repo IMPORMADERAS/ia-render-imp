@@ -3,6 +3,7 @@ from urllib.parse import quote
 
 from fastapi import Depends, FastAPI
 from fastapi import HTTPException
+from fastapi import Request
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -19,6 +20,7 @@ from .routes.admin import router as admin_router
 from .services.auth_wallet import init_auth_wallet_db
 from .services.auth_wallet import require_authenticated_user
 from .services.admin_auth import init_admin_auth_db
+from .services.metrics import MetricsTimer, module_from_request, record_api_request
 from .services.pricing_store import get_pricing_config
 from .services.storage import init_generation_storage_db
 
@@ -28,6 +30,21 @@ init_admin_auth_db()
 init_generation_storage_db()
 
 app = FastAPI(title=settings.app_name, version="0.1.0")
+
+
+@app.middleware("http")
+async def metrics_middleware(request: Request, call_next):
+    timer = MetricsTimer()
+    module = module_from_request(request)
+    status_code = 500
+    try:
+        response = await call_next(request)
+        status_code = int(response.status_code)
+        return response
+    finally:
+        record_api_request(module, status_code, timer.elapsed_ms())
+
+
 static_dir = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=static_dir), name="static")
 

@@ -14,6 +14,12 @@ from ..services.admin_auth import (
     require_admin_user,
 )
 from ..services.auth_wallet import list_all_users, set_user_balance
+from ..services.capacity_advisor import get_capacity_advice
+from ..services.consistency import get_consistency_report
+from ..services.metrics import get_metrics_snapshot
+from ..services.primary_router import module_cutover_config
+from ..services.postgres_mirror import get_postgres_mirror_health
+from ..services.queue import get_queue_health_metrics
 from ..services.storage import list_user_generation_history
 from ..services.pricing_store import get_pricing_config, save_pricing_config
 
@@ -162,3 +168,44 @@ def update_pricing(payload: PricingConfigRequest, admin: AdminUser = Depends(req
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"ok": True, "pricing": updated}
+
+
+@router.get("/infra/health", response_model=dict)
+def infra_health(admin: AdminUser = Depends(require_admin_user)):
+    del admin
+    queue_health = get_queue_health_metrics()
+    pg_health = get_postgres_mirror_health()
+    return {
+        "ok": bool(queue_health.get("redis_ok") or not queue_health.get("redis_configured")),
+        "queue": queue_health,
+        "postgres_mirror": pg_health,
+    }
+
+
+@router.get("/infra/cutover", response_model=dict)
+def infra_cutover(admin: AdminUser = Depends(require_admin_user)):
+    del admin
+    modules = [
+        module_cutover_config("auth"),
+        module_cutover_config("wallet"),
+        module_cutover_config("jobs"),
+    ]
+    return {"modules": modules}
+
+
+@router.get("/infra/consistency", response_model=dict)
+def infra_consistency(admin: AdminUser = Depends(require_admin_user)):
+    del admin
+    return get_consistency_report()
+
+
+@router.get("/infra/metrics", response_model=dict)
+def infra_metrics(admin: AdminUser = Depends(require_admin_user)):
+    del admin
+    return get_metrics_snapshot()
+
+
+@router.get("/infra/advice", response_model=dict)
+def infra_advice(admin: AdminUser = Depends(require_admin_user)):
+    del admin
+    return get_capacity_advice()

@@ -159,6 +159,122 @@
           <p id="admin-pricing-status" class="admin-status">Cargando configuración...</p>
         </section>
 
+        <section class="admin-card infra-card">
+          <div class="section-head section-head--stacked">
+            <div>
+              <p class="admin-kicker">Infraestructura</p>
+              <h2>Salud, cutover y consistencia</h2>
+            </div>
+            <span id="infra-overall-chip" class="detail-chip">Sin datos</span>
+          </div>
+
+          <div class="infra-grid">
+            <section class="infra-panel">
+              <div class="section-head section-head--small">
+                <p class="detail-label">Salud general</p>
+                <span id="infra-health-chip" class="detail-chip">Pendiente</span>
+              </div>
+              <div class="infra-stat-grid">
+                <article class="infra-stat">
+                  <span>Redis</span>
+                  <strong id="infra-redis-status">--</strong>
+                </article>
+                <article class="infra-stat">
+                  <span>Cola</span>
+                  <strong id="infra-queue-status">--</strong>
+                </article>
+                <article class="infra-stat">
+                  <span>Backlog total</span>
+                  <strong id="infra-total-backlog">0</strong>
+                </article>
+                <article class="infra-stat">
+                  <span>Postgres</span>
+                  <strong id="infra-postgres-status">--</strong>
+                </article>
+              </div>
+              <div class="table-wrap infra-table-wrap">
+                <table class="admin-table infra-table">
+                  <thead>
+                    <tr>
+                      <th>Cola</th>
+                      <th>Queued</th>
+                      <th>Started</th>
+                      <th>Failed</th>
+                      <th>Scheduled</th>
+                    </tr>
+                  </thead>
+                  <tbody id="infra-queues-body"></tbody>
+                </table>
+              </div>
+            </section>
+
+            <section class="infra-panel">
+              <div class="section-head section-head--small">
+                <p class="detail-label">Cutover por módulo</p>
+                <span class="detail-chip">Lectura primaria</span>
+              </div>
+              <div id="infra-cutover-cards" class="infra-cutover-list"></div>
+            </section>
+
+            <section class="infra-panel infra-panel--wide">
+              <div class="section-head section-head--small">
+                <p class="detail-label">Consistencia SQLite vs Postgres</p>
+                <span id="infra-consistency-chip" class="detail-chip">Pendiente</span>
+              </div>
+              <div class="table-wrap infra-table-wrap">
+                <table class="admin-table infra-table">
+                  <thead>
+                    <tr>
+                      <th>Métrica</th>
+                      <th>SQLite</th>
+                      <th>Postgres</th>
+                      <th>Cobertura</th>
+                      <th>Estado</th>
+                    </tr>
+                  </thead>
+                  <tbody id="infra-consistency-body"></tbody>
+                </table>
+              </div>
+            </section>
+
+            <section class="infra-panel infra-panel--wide">
+              <div class="section-head section-head--small">
+                <p class="detail-label">Métricas operativas</p>
+                <span id="infra-metrics-chip" class="detail-chip">Pendiente</span>
+              </div>
+              <div class="table-wrap infra-table-wrap">
+                <table class="admin-table infra-table">
+                  <thead>
+                    <tr>
+                      <th>Módulo</th>
+                      <th>API req</th>
+                      <th>Avg ms</th>
+                      <th>5xx</th>
+                      <th>Jobs</th>
+                      <th>Completados</th>
+                      <th>Fallidos</th>
+                      <th>Rechazados</th>
+                      <th>Avg s</th>
+                    </tr>
+                  </thead>
+                  <tbody id="infra-metrics-body"></tbody>
+                </table>
+              </div>
+            </section>
+
+            <section class="infra-panel infra-panel--wide">
+              <div class="section-head section-head--small">
+                <p class="detail-label">Recomendación operativa</p>
+                <span id="infra-advice-chip" class="detail-chip">Pendiente</span>
+              </div>
+              <div id="infra-advice-summary" class="detail-empty">Esperando evaluación.</div>
+              <div id="infra-advice-cards" class="infra-cutover-list"></div>
+            </section>
+          </div>
+
+          <p id="infra-status" class="admin-status">Cargando estado de infraestructura...</p>
+        </section>
+
         <div class="admin-grid">
           <section class="admin-card users-card">
             <div class="section-head">

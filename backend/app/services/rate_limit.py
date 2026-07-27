@@ -2,8 +2,11 @@ from collections import deque
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from threading import Lock
+from time import time
 
 from fastapi import HTTPException, Request
+
+from .queue import get_optional_redis_connection
 
 
 @dataclass
@@ -35,6 +38,24 @@ def enforce_rate_limit(
     window_seconds: int,
     block_seconds: int,
 ) -> None:
+    redis_conn = get_optional_redis_connection()
+    if redis_conn is not None:
+        try:
+            _enforce_rate_limit_redis(
+                redis_conn,
+                scope=scope,
+                key=key,
+                max_attempts=max_attempts,
+                window_seconds=window_seconds,
+                block_seconds=block_seconds,
+            )
+            return
+        except HTTPException:
+            raise
+        except Exception:
+            # Fallback to in-memory limiter when Redis is temporarily unavailable.
+            pass
+
     now = datetime.now(timezone.utc)
     bucket_key = f"{scope}:{(key or '').strip().lower()}"
     window = timedelta(seconds=max(1, int(window_seconds)))
@@ -60,7 +81,52 @@ def enforce_rate_limit(
             raise HTTPException(status_code=429, detail=f"Demasiados intentos. Intenta de nuevo en {block_seconds} segundos")
 
 
+def _enforce_rate_limit_redis(
+    redis_conn,
+    *,
+    scope: str,
+    key: str,
+    max_attempts: int,
+    window_seconds: int,
+    block_seconds: int,
+) -> None:
+    now_ts = float(time())
+    bucket_key = f"rate:{scope}:{(key or '').strip().lower()}"
+    block_key = f"{bucket_key}:blocked"
+    window = max(1, int(window_seconds))
+    block = max(1, int(block_seconds))
+
+    blocked_ttl = redis_conn.ttl(block_key)
+    if blocked_ttl and int(blocked_ttl) > 0:
+        retry_after = int(blocked_ttl)
+        raise HTTPException(status_code=429, detail=f"Demasiados intentos. Intenta de nuevo en {max(1, retry_after)} segundos")
+
+    min_score = now_ts - window
+    pipe = redis_conn.pipeline(transaction=True)
+    pipe.zremrangebyscore(bucket_key, 0, min_score)
+    pipe.zadd(bucket_key, {f"{now_ts:.6f}:{now_ts}": now_ts})
+    pipe.zcard(bucket_key)
+    pipe.expire(bucket_key, window + block + 5)
+    result = pipe.execute()
+    attempts = int(result[2] or 0)
+
+    if attempts > int(max_attempts):
+        pipe = redis_conn.pipeline(transaction=True)
+        pipe.delete(bucket_key)
+        pipe.setex(block_key, block, "1")
+        pipe.execute()
+        raise HTTPException(status_code=429, detail=f"Demasiados intentos. Intenta de nuevo en {block} segundos")
+
+
 def reset_rate_limit(scope: str, key: str) -> None:
     bucket_key = f"{scope}:{(key or '').strip().lower()}"
+    redis_conn = get_optional_redis_connection()
+    if redis_conn is not None:
+        try:
+            redis_base = f"rate:{scope}:{(key or '').strip().lower()}"
+            redis_conn.delete(redis_base)
+            redis_conn.delete(f"{redis_base}:blocked")
+        except Exception:
+            pass
     with _LOCK:
         _BUCKETS.pop(bucket_key, None)

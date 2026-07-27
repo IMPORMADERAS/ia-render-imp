@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response
 from fastapi.responses import FileResponse
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 
 from ..services.auth_wallet import (
@@ -24,7 +25,7 @@ from ..services.auth_wallet import (
     send_registration_success_notification,
     update_user_profile,
 )
-from ..services.storage import delete_user_generation_data, get_user_generation_download, list_user_generation_history
+from ..services.storage import delete_user_generation_data, get_record_download_target, get_user_generation_download, list_user_generation_history, resolve_download_url
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -269,8 +270,26 @@ def download_generation(
 
     try:
         file_path, filename = get_user_generation_download(user.user_id, output_type, output_id)
-    except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError:
+        record = None
+        if output_type == "job":
+            from ..services.storage import get_job as _get_job
+            record = _get_job(output_id)
+        elif output_type == "anim":
+            from ..services.storage import get_anim as _get_anim
+            record = _get_anim(output_id)
+        elif output_type == "music":
+            from ..services.storage import get_music as _get_music
+            record = _get_music(output_id)
+
+        if record is None or int(record.get("billed_user_id") or 0) != int(user.user_id):
+            raise HTTPException(status_code=404, detail="Generacion no encontrada")
+
+        target = get_record_download_target(record, output_type, output_id)
+        remote_url = resolve_download_url(target.get("storage_key") or "", target.get("storage_url") or "")
+        if not remote_url:
+            raise HTTPException(status_code=404, detail="Archivo no disponible")
+        return RedirectResponse(url=remote_url, status_code=307)
 
     import mimetypes as _mt
     media_type = _mt.guess_type(str(file_path))[0] or "application/octet-stream"

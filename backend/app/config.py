@@ -44,6 +44,59 @@ class Settings(BaseSettings):
     replicate_retry_initial_delay_seconds: float = 1.2
     fallback_to_local_on_cloud_error: bool = False
 
+    jobs_queue_enabled: bool = False
+    redis_url: str = ""
+    queue_require_redis: bool = False
+    rq_default_queue: str = "default"
+    rq_queues: str = "default,render,video,music,influencer"
+    rq_job_timeout_seconds: int = 1800
+
+    postgres_mirror_enabled: bool = False
+    postgres_dsn: str = ""
+    postgres_primary_auth_enabled: bool = False
+    postgres_primary_wallet_enabled: bool = False
+    postgres_primary_jobs_enabled: bool = False
+    postgres_primary_auth_percent: int = 0
+    postgres_primary_wallet_percent: int = 0
+    postgres_primary_jobs_percent: int = 0
+    postgres_cutover_seed: str = "iaimp-cutover"
+    sqlite_fallback_enabled: bool = True
+
+    render_queue_backlog_limit: int = 250
+    video_queue_backlog_limit: int = 80
+    music_queue_backlog_limit: int = 120
+    influencer_queue_backlog_limit: int = 40
+    render_user_active_limit: int = 3
+    video_user_active_limit: int = 1
+    music_user_active_limit: int = 2
+    influencer_user_active_limit: int = 1
+
+    object_storage_enabled: bool = False
+    object_storage_bucket: str = ""
+    object_storage_region: str = ""
+    object_storage_endpoint_url: str = ""
+    object_storage_access_key_id: str = ""
+    object_storage_secret_access_key: str = ""
+    object_storage_public_base_url: str = ""
+    object_storage_presign_expiry_seconds: int = 3600
+
+    benchmark_mode_enabled: bool = False
+    benchmark_job_duration_seconds: int = 1
+
+    render_latency_warn_ms: int = 1200
+    render_rejection_warn_count: int = 10
+    render_error_warn_count: int = 5
+    video_latency_warn_ms: int = 1500
+    video_rejection_warn_count: int = 5
+    video_error_warn_count: int = 3
+    music_latency_warn_ms: int = 1000
+    music_rejection_warn_count: int = 8
+    music_error_warn_count: int = 4
+    influencer_latency_warn_ms: int = 1800
+    influencer_rejection_warn_count: int = 3
+    influencer_error_warn_count: int = 2
+    consistency_min_coverage_pct: float = 99.0
+
     use_gpu: bool = True
     max_image_size: int = 2048
     default_steps: int = 35

@@ -4,12 +4,15 @@ from uuid import uuid4
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException
 from fastapi.responses import FileResponse
+from fastapi.responses import RedirectResponse
 
 from ..config import settings
-from ..services.music_generator import music_generator
+from ..services.admission_control import enforce_generation_capacity, release_generation_slot, reserve_generation_slot
 from ..services.storage import create_music, get_music, update_music
 from ..services.auth_wallet import AuthenticatedUser, InsufficientBalanceError, credit_balance, debit_balance, require_authenticated_user
 from ..services.billing import module_cost_music_cop
+from ..services.queue import QueueUnavailableError, enqueue_or_background
+from ..services.worker_tasks import run_music_job
 
 router = APIRouter(prefix="/music", tags=["music"])
 
@@ -40,61 +43,59 @@ async def generate_music(
     if safe_mode not in {"instrumental", "song"}:
         raise HTTPException(status_code=400, detail="mode debe ser 'instrumental' o 'song'")
 
-    safe_duration = max(8, min(180, int(duration_seconds)))
-    music_id = str(uuid4())
+    enforce_generation_capacity("music", user.user_id)
+    reserve_generation_slot("music", user.user_id)
 
-    billed_amount = module_cost_music_cop(safe_duration)
     try:
-        balance_after = debit_balance(user.user_id, billed_amount, "music", f"Generacion musica {music_id}")
-    except InsufficientBalanceError as exc:
-        raise HTTPException(status_code=402, detail="Saldo insuficiente. Recarga tu cuenta para generar audio.") from exc
+        safe_duration = max(8, min(180, int(duration_seconds)))
+        music_id = str(uuid4())
 
-    MUSIC_DIR.mkdir(parents=True, exist_ok=True)
-    output_path = MUSIC_DIR / f"{music_id}.mp3"
-
-    create_music(
-        music_id,
-        {
-            "music_id": music_id,
-            "status": "queued",
-            "mode": safe_mode,
-            "genre": genre,
-            "mood": mood,
-            "instruments": instruments,
-            "user_taste": user_taste,
-            "duration_seconds": safe_duration,
-            "bpm": bpm,
-            "language": language,
-            "theme": theme,
-            "custom_lyrics": custom_lyrics,
-            "audio_output": None,
-            "error": None,
-            "stage": "En cola",
-            "progress": 0,
-            "model": None,
-            "started_at": None,
-            "completed_at": None,
-            "updated_at": _utc(),
-            "billed_user_id": user.user_id,
-            "billed_amount_cop": billed_amount,
-            "balance_after_debit": balance_after,
-        },
-    )
-
-    def run_music() -> None:
+        billed_amount = module_cost_music_cop(safe_duration)
         try:
-            update_music(
-                music_id,
-                {
-                    "status": "processing",
-                    "stage": "Generando audio",
-                    "progress": 20,
-                    "started_at": _utc(),
-                    "updated_at": _utc(),
-                },
-            )
+            balance_after = debit_balance(user.user_id, billed_amount, "music", f"Generacion musica {music_id}")
+        except InsufficientBalanceError as exc:
+            raise HTTPException(status_code=402, detail="Saldo insuficiente. Recarga tu cuenta para generar audio.") from exc
 
-            result = music_generator.generate_replicate(
+        MUSIC_DIR.mkdir(parents=True, exist_ok=True)
+        output_path = MUSIC_DIR / f"{music_id}.mp3"
+
+        create_music(
+            music_id,
+            {
+                "music_id": music_id,
+                "status": "queued",
+                "mode": safe_mode,
+                "genre": genre,
+                "mood": mood,
+                "instruments": instruments,
+                "user_taste": user_taste,
+                "duration_seconds": safe_duration,
+                "bpm": bpm,
+                "language": language,
+                "theme": theme,
+                "custom_lyrics": custom_lyrics,
+                "audio_output": None,
+                "error": None,
+                "stage": "En cola",
+                "progress": 0,
+                "model": None,
+                "started_at": None,
+                "completed_at": None,
+                "updated_at": _utc(),
+                "billed_user_id": user.user_id,
+                "billed_amount_cop": billed_amount,
+                "balance_after_debit": balance_after,
+            },
+        )
+
+        try:
+            queue_task_id = enqueue_or_background(
+                background_tasks,
+                run_music_job,
+                queue_name="music",
+                music_id=music_id,
+                user_id=user.user_id,
+                billed_amount=billed_amount,
                 output_audio_path=str(output_path),
                 mode=safe_mode,
                 genre=genre,
@@ -108,23 +109,9 @@ async def generate_music(
                 custom_lyrics=custom_lyrics,
                 seed=seed,
             )
-
-            elapsed = int(result.get("duration_seconds", 1))
-            update_music(
-                music_id,
-                {
-                    "status": "completed",
-                    "audio_output": str(output_path),
-                    "progress": 100,
-                    "stage": f"Audio listo ({elapsed}s)",
-                    "model": str(result.get("model", "")),
-                    "completed_at": _utc(),
-                    "updated_at": _utc(),
-                },
-            )
-        except Exception as exc:
+        except QueueUnavailableError as exc:
             try:
-                credit_balance(user.user_id, billed_amount, "music_refund", f"Reembolso por fallo musica {music_id}")
+                credit_balance(user.user_id, billed_amount, "music_refund", f"Reembolso por cola no disponible {music_id}")
             except Exception:
                 pass
             update_music(
@@ -132,13 +119,15 @@ async def generate_music(
                 {
                     "status": "failed",
                     "error": str(exc),
-                    "stage": "Fallo en generacion musical",
+                    "stage": "Cola no disponible",
                     "updated_at": _utc(),
                 },
             )
-
-    background_tasks.add_task(run_music)
-    return {"music_id": music_id, "status": "queued"}
+            raise HTTPException(status_code=503, detail="Cola temporalmente no disponible. Intenta nuevamente en unos minutos.") from exc
+        return {"music_id": music_id, "status": "queued", "queue_task_id": queue_task_id}
+    except Exception:
+        release_generation_slot("music", user.user_id)
+        raise
 
 
 @router.get("/{music_id}", response_model=dict)
@@ -159,6 +148,12 @@ def get_music_audio(music_id: str):
 
     audio_path = music.get("audio_output")
     if not audio_path or not Path(audio_path).exists():
+        remote_url = str(music.get("audio_storage_url") or "").strip()
+        if not remote_url and music.get("audio_storage_key"):
+            from ..services.storage import resolve_download_url
+            remote_url = resolve_download_url(str(music.get("audio_storage_key") or ""), "")
+        if remote_url:
+            return RedirectResponse(url=remote_url, status_code=307)
         raise HTTPException(status_code=404, detail="Archivo de audio no encontrado")
 
     mode = music.get("mode", "music")

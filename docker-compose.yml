@@ -11,6 +11,33 @@ services:
       - backend/.env
     environment:
       - UVICORN_WORKERS=2
+      - JOBS_QUEUE_ENABLED=true
+      - REDIS_URL=redis://redis:6379/0
     volumes:
       - ./backend/data:/app/backend/data
+    restart: unless-stopped
+    depends_on:
+      - redis
+
+  worker:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: ia-render-worker
+    env_file:
+      - backend/.env
+    environment:
+      - JOBS_QUEUE_ENABLED=true
+      - REDIS_URL=redis://redis:6379/0
+      - RQ_QUEUES=default,render,video,music,influencer
+    command: ["python", "backend/worker.py"]
+    volumes:
+      - ./backend/data:/app/backend/data
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: ia-render-redis
     restart: unless-stopped

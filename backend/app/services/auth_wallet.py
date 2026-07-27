@@ -14,6 +14,43 @@ from pathlib import Path
 from fastapi import Cookie, HTTPException
 
 from ..config import settings
+from .primary_router import should_read_from_postgres, sqlite_fallback_enabled
+from .postgres_mirror import (
+    create_user as pg_create_user,
+    create_password_reset_token_record as pg_create_password_reset_token_record,
+    create_recharge_payment_intent_record as pg_create_recharge_payment_intent_record,
+    create_wallet_session as pg_create_wallet_session,
+    credit_balance as pg_credit_balance,
+    debit_balance as pg_debit_balance,
+    delete_user_account as pg_delete_user_account,
+    delete_wallet_session as pg_delete_wallet_session,
+    get_password_reset_token_record as pg_get_password_reset_token_record,
+    get_recent_ledger as pg_get_recent_ledger,
+    get_recharge_payment_intent_record as pg_get_recharge_payment_intent_record,
+    get_user_auth_by_email as pg_get_user_auth_by_email,
+    get_user_auth_by_id as pg_get_user_auth_by_id,
+    get_user_balance as pg_get_user_balance,
+    get_user_by_session_token as pg_get_user_by_session_token,
+    get_user_profile as pg_get_user_profile,
+    get_user_public_by_email as pg_get_user_public_by_email,
+    list_pending_recharge_payment_intents_records as pg_list_pending_recharge_payment_intents,
+    list_all_users as pg_list_all_users,
+    mark_password_reset_sent_record as pg_mark_password_reset_sent_record,
+    mark_password_reset_used_record as pg_mark_password_reset_used_record,
+    init_postgres_mirror_schema,
+    mirror_create_session,
+    mirror_delete_sessions_for_user,
+    mirror_delete_user_data,
+    mirror_delete_session,
+    mirror_upsert_user,
+    mirror_add_wallet_ledger,
+    record_notification_event_once as pg_record_notification_event_once,
+    set_recharge_payment_status_record as pg_set_recharge_payment_status_record,
+    settle_recharge_if_approved_record as pg_settle_recharge_if_approved_record,
+    set_user_balance as pg_set_user_balance,
+    update_user_password as pg_update_user_password,
+    update_user_profile as pg_update_user_profile,
+)
 from .security import ensure_strong_password
 
 DB_PATH = Path(settings.data_dir) / "accounts.db"
@@ -51,6 +88,11 @@ def _get_conn() -> sqlite3.Connection:
 
 
 def init_auth_wallet_db() -> None:
+    try:
+        init_postgres_mirror_schema()
+    except Exception:
+        pass
+
     with _get_conn() as conn:
         conn.executescript(
             """
@@ -206,6 +248,27 @@ def _public_user(row: sqlite3.Row) -> dict:
     }
 
 
+def _mirror_user_row(row: sqlite3.Row) -> None:
+    try:
+        mirror_upsert_user(
+            {
+                "id": int(row["id"]),
+                "username": str(row["username"]),
+                "first_name": str(row["first_name"] or ""),
+                "last_name": str(row["last_name"] or ""),
+                "phone": str(row["phone"] or ""),
+                "email": str(row["email"] or ""),
+                "password_hash": str(row["password_hash"] or ""),
+                "salt": str(row["salt"] or ""),
+                "balance_cop": int(row["balance_cop"] or 0),
+                "created_at": str(row["created_at"] or ""),
+                "updated_at": str(row["updated_at"] or ""),
+            }
+        )
+    except Exception:
+        pass
+
+
 def register_user(first_name: str, last_name: str, email: str, password: str, phone: str = "") -> dict:
     safe_first_name = (first_name or "").strip()
     safe_last_name = (last_name or "").strip()
@@ -221,6 +284,30 @@ def register_user(first_name: str, last_name: str, email: str, password: str, ph
     salt = secrets.token_hex(16)
     pwd_hash = _hash_password(password, salt)
     now = _utc_now_iso()
+    pg_created_user: dict | None = None
+    use_pg_primary = should_read_from_postgres("auth", safe_email)
+
+    if use_pg_primary:
+        try:
+            pg_created_user = pg_create_user(
+                username=uname,
+                first_name=safe_first_name,
+                last_name=safe_last_name,
+                phone=(phone or "").strip(),
+                email=safe_email,
+                password_hash=pwd_hash,
+                salt=salt,
+                balance_cop=0,
+                created_at=now,
+                updated_at=now,
+            )
+            if not sqlite_fallback_enabled():
+                return pg_created_user
+        except ValueError:
+            raise
+        except Exception:
+            if not sqlite_fallback_enabled():
+                raise
 
     try:
         with _get_conn() as conn:
@@ -230,15 +317,28 @@ def register_user(first_name: str, last_name: str, email: str, password: str, ph
 
             conn.execute(
                 """
-                INSERT INTO users (username, first_name, last_name, phone, email, password_hash, salt, balance_cop, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+                INSERT INTO users (id, username, first_name, last_name, phone, email, password_hash, salt, balance_cop, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
                 """,
-                (uname, safe_first_name, safe_last_name, (phone or "").strip(), safe_email, pwd_hash, salt, now, now),
+                (
+                    int(pg_created_user["user_id"]) if pg_created_user else None,
+                    uname,
+                    safe_first_name,
+                    safe_last_name,
+                    (phone or "").strip(),
+                    safe_email,
+                    pwd_hash,
+                    salt,
+                    now,
+                    now,
+                ),
             )
             row = conn.execute("SELECT * FROM users WHERE email = ?", (safe_email,)).fetchone()
             if row is None:
                 raise RuntimeError("No se pudo crear el usuario")
-            return _public_user(row)
+            if not use_pg_primary:
+                _mirror_user_row(row)
+            return pg_created_user or _public_user(row)
     except sqlite3.IntegrityError as exc:
         raise ValueError("Ese email ya existe") from exc
 
@@ -247,16 +347,30 @@ def _format_cop(amount_cop: int) -> str:
     return f"{int(amount_cop):,}".replace(",", ".")
 
 
-def _record_notification_event_once(event_key: str) -> bool:
+def _record_notification_event_once(event_key: str, module: str = "auth") -> bool:
     safe_key = (event_key or "").strip()
     if not safe_key:
         return False
+
+    created_at = _utc_now_iso()
+    use_pg_primary = should_read_from_postgres(module, safe_key)
+
+    if use_pg_primary:
+        try:
+            saved = bool(pg_record_notification_event_once(safe_key, created_at))
+            if not sqlite_fallback_enabled():
+                return saved
+            if not saved:
+                return False
+        except Exception:
+            if not sqlite_fallback_enabled():
+                raise
 
     try:
         with _get_conn() as conn:
             conn.execute(
                 "INSERT INTO notification_events (event_key, created_at) VALUES (?, ?)",
-                (safe_key, _utc_now_iso()),
+                (safe_key, created_at),
             )
         return True
     except sqlite3.IntegrityError:
@@ -391,7 +505,7 @@ def send_registration_success_notification(user: dict) -> dict:
     if user_id <= 0:
         return {"delivered": False, "mode": "skipped", "reason": "user_id_invalido"}
 
-    if not _record_notification_event_once(f"registration-success:{user_id}"):
+    if not _record_notification_event_once(f"registration-success:{user_id}", module="auth"):
         return {"delivered": False, "mode": "skipped", "reason": "already_sent"}
 
     email = str(user.get("email") or "").strip()
@@ -449,7 +563,7 @@ def send_payment_success_notification(
 
     safe_reference = (reference or "").strip() or "SIN-REFERENCIA"
     event_key = f"payment-success:{safe_reference}"
-    if not _record_notification_event_once(event_key):
+    if not _record_notification_event_once(event_key, module="wallet"):
         return {"delivered": False, "mode": "skipped", "reason": "already_sent"}
 
     name = _full_name(str(contact.get("first_name") or ""), str(contact.get("last_name") or ""))
@@ -490,7 +604,7 @@ def send_payment_failed_notification(
     safe_reference = (reference or "").strip() or "SIN-REFERENCIA"
     safe_status = (status or "").strip().upper() or "FAILED"
     event_key = f"payment-failed:{safe_reference}:{safe_status}"
-    if not _record_notification_event_once(event_key):
+    if not _record_notification_event_once(event_key, module="wallet"):
         return {"delivered": False, "mode": "skipped", "reason": "already_sent"}
 
     name = _full_name(str(contact.get("first_name") or ""), str(contact.get("last_name") or ""))
@@ -558,6 +672,30 @@ def authenticate_user(login: str, password: str) -> dict | None:
     except ValueError:
         return None
 
+    if should_read_from_postgres("auth", safe_email):
+        try:
+            row = pg_get_user_auth_by_email(safe_email)
+            if row is not None:
+                expected = str(row.get("password_hash") or "")
+                provided = _hash_password(password or "", str(row.get("salt") or ""))
+                if hmac.compare_digest(expected, provided):
+                    return {
+                        "user_id": int(row.get("id") or 0),
+                        "username": str(row.get("username") or ""),
+                        "first_name": str(row.get("first_name") or ""),
+                        "last_name": str(row.get("last_name") or ""),
+                        "phone": str(row.get("phone") or ""),
+                        "email": str(row.get("email") or ""),
+                        "balance_cop": int(row.get("balance_cop") or 0),
+                        "created_at": str(row.get("created_at") or ""),
+                    }
+                return None
+            if not sqlite_fallback_enabled():
+                return None
+        except Exception:
+            if not sqlite_fallback_enabled():
+                return None
+
     with _get_conn() as conn:
         row = conn.execute("SELECT * FROM users WHERE email = ?", (safe_email,)).fetchone()
         if row is None:
@@ -575,6 +713,15 @@ def create_session(user_id: int, days: int = 30) -> str:
     now = datetime.now(timezone.utc)
     expires = now + timedelta(days=max(1, days))
 
+    if should_read_from_postgres("auth", user_id):
+        try:
+            pg_create_wallet_session(token, int(user_id), expires.isoformat(), now.isoformat())
+            if not sqlite_fallback_enabled():
+                return token
+        except Exception:
+            if not sqlite_fallback_enabled():
+                raise
+
     with _get_conn() as conn:
         conn.execute(
             """
@@ -584,19 +731,52 @@ def create_session(user_id: int, days: int = 30) -> str:
             (token, int(user_id), expires.isoformat(), now.isoformat()),
         )
 
+    if not should_read_from_postgres("auth", user_id):
+        try:
+            mirror_create_session(token, int(user_id), expires.isoformat(), now.isoformat())
+        except Exception:
+            pass
+
     return token
 
 
 def delete_session(token: str) -> None:
     if not token:
         return
+
+    if should_read_from_postgres("auth", token):
+        try:
+            pg_delete_wallet_session(token)
+            if not sqlite_fallback_enabled():
+                return
+        except Exception:
+            if not sqlite_fallback_enabled():
+                raise
+
     with _get_conn() as conn:
         conn.execute("DELETE FROM sessions WHERE token = ?", (token,))
+
+    if not should_read_from_postgres("auth", token):
+        try:
+            mirror_delete_session(token)
+        except Exception:
+            pass
 
 
 def get_user_by_session_token(token: str | None) -> dict | None:
     if not token:
         return None
+
+    if should_read_from_postgres("auth", token):
+        try:
+            result = pg_get_user_by_session_token(token)
+            if result is not None:
+                return result
+            if not sqlite_fallback_enabled():
+                return None
+        except Exception:
+            if not sqlite_fallback_enabled():
+                return None
 
     now = datetime.now(timezone.utc)
     with _get_conn() as conn:
@@ -616,6 +796,10 @@ def get_user_by_session_token(token: str | None) -> dict | None:
         expires = datetime.fromisoformat(str(row["expires_at"]))
         if expires < now:
             conn.execute("DELETE FROM sessions WHERE token = ?", (token,))
+            try:
+                mirror_delete_session(token)
+            except Exception:
+                pass
             return None
 
         return {
@@ -641,17 +825,43 @@ def require_authenticated_user(session_token: str | None = Cookie(default=None, 
     )
 
 
-def _add_ledger(conn: sqlite3.Connection, user_id: int, tx_type: str, amount_cop: int, module: str, note: str) -> None:
+def _add_ledger(
+    conn: sqlite3.Connection,
+    user_id: int,
+    tx_type: str,
+    amount_cop: int,
+    module: str,
+    note: str,
+    *,
+    mirror_enabled: bool = True,
+) -> None:
+    created_at = _utc_now_iso()
     conn.execute(
         """
         INSERT INTO wallet_ledger (user_id, tx_type, amount_cop, module, note, created_at)
         VALUES (?, ?, ?, ?, ?, ?)
         """,
-        (int(user_id), tx_type, int(amount_cop), module, note, _utc_now_iso()),
+        (int(user_id), tx_type, int(amount_cop), module, note, created_at),
     )
+    if mirror_enabled:
+        try:
+            mirror_add_wallet_ledger(int(user_id), str(tx_type), int(amount_cop), str(module), str(note), created_at)
+        except Exception:
+            pass
 
 
 def get_user_balance(user_id: int) -> int:
+    if should_read_from_postgres("wallet", user_id):
+        try:
+            pg_balance = pg_get_user_balance(int(user_id))
+            if pg_balance is not None:
+                return int(pg_balance)
+            if not sqlite_fallback_enabled():
+                raise ValueError("Usuario no encontrado")
+        except Exception:
+            if not sqlite_fallback_enabled():
+                raise
+
     with _get_conn() as conn:
         row = conn.execute("SELECT balance_cop FROM users WHERE id = ?", (int(user_id),)).fetchone()
         if row is None:
@@ -663,6 +873,16 @@ def credit_balance(user_id: int, amount_cop: int, module: str, note: str) -> int
     amount = int(amount_cop)
     if amount <= 0:
         raise ValueError("El monto debe ser mayor a 0")
+    use_pg_primary = should_read_from_postgres("wallet", user_id)
+
+    if use_pg_primary:
+        try:
+            new_balance = int(pg_credit_balance(int(user_id), amount, module, note))
+            if not sqlite_fallback_enabled():
+                return new_balance
+        except Exception:
+            if not sqlite_fallback_enabled():
+                raise
 
     with _get_conn() as conn:
         row = conn.execute("SELECT balance_cop FROM users WHERE id = ?", (int(user_id),)).fetchone()
@@ -674,7 +894,10 @@ def credit_balance(user_id: int, amount_cop: int, module: str, note: str) -> int
             "UPDATE users SET balance_cop = ?, updated_at = ? WHERE id = ?",
             (new_balance, _utc_now_iso(), int(user_id)),
         )
-        _add_ledger(conn, int(user_id), "credit", amount, module, note)
+        _add_ledger(conn, int(user_id), "credit", amount, module, note, mirror_enabled=not use_pg_primary)
+        user_row = conn.execute("SELECT * FROM users WHERE id = ?", (int(user_id),)).fetchone()
+        if user_row is not None and not use_pg_primary:
+            _mirror_user_row(user_row)
         return new_balance
 
 
@@ -686,6 +909,39 @@ def debit_balance(user_id: int, amount_cop: int, module: str, note: str) -> int:
     should_notify_low_balance = False
     low_balance_contact: dict | None = None
     low_balance_threshold = 1000
+    use_pg_primary = should_read_from_postgres("wallet", user_id)
+
+    if use_pg_primary:
+        try:
+            result = pg_debit_balance(int(user_id), amount, module, note)
+            new_balance = int(result.get("new_balance") or 0)
+            previous_balance = int(result.get("previous_balance") or 0)
+            should_notify_low_balance = previous_balance > low_balance_threshold and new_balance <= low_balance_threshold
+            if should_notify_low_balance and str(result.get("email") or "").strip():
+                low_balance_contact = {
+                    "email": str(result.get("email") or "").strip(),
+                    "first_name": str(result.get("first_name") or ""),
+                    "last_name": str(result.get("last_name") or ""),
+                }
+            if not sqlite_fallback_enabled():
+                if should_notify_low_balance and low_balance_contact and low_balance_contact.get("email"):
+                    try:
+                        send_low_balance_notification(
+                            user_id=int(user_id),
+                            email=str(low_balance_contact["email"]),
+                            first_name=str(low_balance_contact["first_name"]),
+                            last_name=str(low_balance_contact["last_name"]),
+                            balance_cop=new_balance,
+                            threshold_cop=low_balance_threshold,
+                        )
+                    except Exception:
+                        pass
+                return new_balance
+        except Exception as exc:
+            if not sqlite_fallback_enabled():
+                if str(exc) == "Saldo insuficiente":
+                    raise InsufficientBalanceError("Saldo insuficiente") from exc
+                raise
 
     with _get_conn() as conn:
         row = conn.execute("SELECT balance_cop FROM users WHERE id = ?", (int(user_id),)).fetchone()
@@ -701,7 +957,10 @@ def debit_balance(user_id: int, amount_cop: int, module: str, note: str) -> int:
             "UPDATE users SET balance_cop = ?, updated_at = ? WHERE id = ?",
             (new_balance, _utc_now_iso(), int(user_id)),
         )
-        _add_ledger(conn, int(user_id), "debit", amount, module, note)
+        _add_ledger(conn, int(user_id), "debit", amount, module, note, mirror_enabled=not use_pg_primary)
+        user_row = conn.execute("SELECT * FROM users WHERE id = ?", (int(user_id),)).fetchone()
+        if user_row is not None and not use_pg_primary:
+            _mirror_user_row(user_row)
         should_notify_low_balance = current > low_balance_threshold and new_balance <= low_balance_threshold
         if should_notify_low_balance:
             contact_row = conn.execute(
@@ -732,6 +991,17 @@ def debit_balance(user_id: int, amount_cop: int, module: str, note: str) -> int:
 
 
 def get_recent_ledger(user_id: int, limit: int = 50) -> list[dict]:
+    if should_read_from_postgres("wallet", user_id):
+        try:
+            items = pg_get_recent_ledger(int(user_id), limit=int(limit))
+            if items:
+                return items
+            if not sqlite_fallback_enabled():
+                return []
+        except Exception:
+            if not sqlite_fallback_enabled():
+                return []
+
     safe_limit = max(1, min(200, int(limit)))
     with _get_conn() as conn:
         rows = conn.execute(
@@ -861,6 +1131,17 @@ def list_user_chat_history(user_id: int, limit: int = 120) -> list[dict]:
 
 
 def get_user_profile(user_id: int) -> dict:
+    if should_read_from_postgres("auth", user_id):
+        try:
+            item = pg_get_user_profile(int(user_id))
+            if item is not None:
+                return item
+            if not sqlite_fallback_enabled():
+                raise ValueError("Usuario no encontrado")
+        except Exception:
+            if not sqlite_fallback_enabled():
+                raise
+
     with _get_conn() as conn:
         row = conn.execute(
             """
@@ -876,6 +1157,17 @@ def get_user_profile(user_id: int) -> dict:
 
 
 def list_all_users() -> list[dict]:
+    if should_read_from_postgres("auth", "all-users"):
+        try:
+            items = pg_list_all_users(limit=5000)
+            if items:
+                return items
+            if not sqlite_fallback_enabled():
+                return []
+        except Exception:
+            if not sqlite_fallback_enabled():
+                return []
+
     with _get_conn() as conn:
         rows = conn.execute(
             """
@@ -905,6 +1197,16 @@ def set_user_balance(user_id: int, new_balance_cop: int, module: str = "admin_ad
     target_balance = int(new_balance_cop)
     if target_balance < 0:
         raise ValueError("El saldo no puede ser negativo")
+    use_pg_primary = should_read_from_postgres("wallet", user_id)
+
+    if use_pg_primary:
+        try:
+            new_balance = int(pg_set_user_balance(int(user_id), target_balance, module, note))
+            if not sqlite_fallback_enabled():
+                return new_balance
+        except Exception:
+            if not sqlite_fallback_enabled():
+                raise
 
     with _get_conn() as conn:
         row = conn.execute("SELECT balance_cop FROM users WHERE id = ?", (int(user_id),)).fetchone()
@@ -923,12 +1225,35 @@ def set_user_balance(user_id: int, new_balance_cop: int, module: str = "admin_ad
 
         delta = target_balance - current_balance
         tx_type = "credit" if delta > 0 else "debit"
-        _add_ledger(conn, int(user_id), tx_type, abs(delta), module, note)
+        _add_ledger(conn, int(user_id), tx_type, abs(delta), module, note, mirror_enabled=not use_pg_primary)
+        user_row = conn.execute("SELECT * FROM users WHERE id = ?", (int(user_id),)).fetchone()
+        if user_row is not None and not use_pg_primary:
+            _mirror_user_row(user_row)
         return target_balance
 
 
 def change_password(user_id: int, current_password: str, new_password: str) -> None:
     ensure_strong_password(new_password)
+
+    if should_read_from_postgres("auth", user_id):
+        try:
+            row = pg_get_user_auth_by_id(int(user_id))
+            if row is None:
+                raise ValueError("Usuario no encontrado")
+
+            expected = str(row.get("password_hash") or "")
+            provided = _hash_password(current_password or "", str(row.get("salt") or ""))
+            if not hmac.compare_digest(expected, provided):
+                raise ValueError("La contraseña actual no coincide")
+
+            new_salt = secrets.token_hex(16)
+            new_hash = _hash_password(new_password, new_salt)
+            pg_update_user_password(int(user_id), new_hash, new_salt)
+            if not sqlite_fallback_enabled():
+                return
+        except Exception:
+            if not sqlite_fallback_enabled():
+                raise
 
     with _get_conn() as conn:
         row = conn.execute("SELECT password_hash, salt FROM users WHERE id = ?", (int(user_id),)).fetchone()
@@ -946,6 +1271,9 @@ def change_password(user_id: int, current_password: str, new_password: str) -> N
             "UPDATE users SET password_hash = ?, salt = ?, updated_at = ? WHERE id = ?",
             (new_hash, new_salt, _utc_now_iso(), int(user_id)),
         )
+        user_row = conn.execute("SELECT * FROM users WHERE id = ?", (int(user_id),)).fetchone()
+        if user_row is not None:
+            _mirror_user_row(user_row)
 
 
 def update_user_profile(user_id: int, first_name: str, last_name: str, email: str, phone: str, username: str) -> dict:
@@ -959,6 +1287,22 @@ def update_user_profile(user_id: int, first_name: str, last_name: str, email: st
     safe_email = _normalize_email(email)
     safe_phone = _normalize_optional_phone(phone)
     safe_username = _normalize_username(username)
+
+    if should_read_from_postgres("auth", user_id):
+        try:
+            profile = pg_update_user_profile(
+                int(user_id),
+                username=safe_username,
+                first_name=safe_first_name,
+                last_name=safe_last_name,
+                phone=safe_phone,
+                email=safe_email,
+            )
+            if not sqlite_fallback_enabled():
+                return profile
+        except Exception:
+            if not sqlite_fallback_enabled():
+                raise
 
     with _get_conn() as conn:
         existing_user = conn.execute("SELECT id FROM users WHERE id = ?", (int(user_id),)).fetchone()
@@ -985,11 +1329,24 @@ def update_user_profile(user_id: int, first_name: str, last_name: str, email: st
         row = conn.execute("SELECT * FROM users WHERE id = ?", (int(user_id),)).fetchone()
         if row is None:
             raise ValueError("Usuario no encontrado")
+        _mirror_user_row(row)
         return _public_user(row)
 
 
 def get_user_by_email(email: str) -> dict | None:
     safe_email = _normalize_email(email)
+
+    if should_read_from_postgres("auth", safe_email):
+        try:
+            item = pg_get_user_public_by_email(safe_email)
+            if item is not None:
+                return item
+            if not sqlite_fallback_enabled():
+                return None
+        except Exception:
+            if not sqlite_fallback_enabled():
+                return None
+
     with _get_conn() as conn:
         row = conn.execute("SELECT * FROM users WHERE email = ?", (safe_email,)).fetchone()
         if row is None:
@@ -999,6 +1356,16 @@ def get_user_by_email(email: str) -> dict | None:
 
 def delete_user_account(user_id: int) -> dict:
     uid = int(user_id)
+
+    if should_read_from_postgres("auth", uid):
+        try:
+            summary = pg_delete_user_account(uid)
+            if not sqlite_fallback_enabled():
+                return summary
+        except Exception:
+            if not sqlite_fallback_enabled():
+                raise
+
     with _get_conn() as conn:
         row = conn.execute(
             "SELECT id, email, balance_cop FROM users WHERE id = ?",
@@ -1028,6 +1395,12 @@ def delete_user_account(user_id: int) -> dict:
             conn.execute("DELETE FROM notification_events WHERE event_key = ?", (f"payment-success:{ref}",))
             conn.execute("DELETE FROM notification_events WHERE event_key LIKE ?", (f"payment-failed:{ref}:%",))
 
+    try:
+        mirror_delete_sessions_for_user(uid)
+        mirror_delete_user_data(uid)
+    except Exception:
+        pass
+
     return {
         "ok": True,
         "user_id": uid,
@@ -1042,6 +1415,15 @@ def create_password_reset_token(user_id: int, email: str, minutes_valid: int = 6
     now = datetime.now(timezone.utc)
     expires = now + timedelta(minutes=max(5, minutes_valid))
 
+    if should_read_from_postgres("auth", token):
+        try:
+            pg_create_password_reset_token_record(token, int(user_id), _normalize_email(email), expires.isoformat(), now.isoformat())
+            if not sqlite_fallback_enabled():
+                return token
+        except Exception:
+            if not sqlite_fallback_enabled():
+                raise
+
     with _get_conn() as conn:
         conn.execute(
             """
@@ -1055,6 +1437,15 @@ def create_password_reset_token(user_id: int, email: str, minutes_valid: int = 6
 
 
 def mark_password_reset_sent(token: str) -> None:
+    if should_read_from_postgres("auth", token):
+        try:
+            pg_mark_password_reset_sent_record((token or "").strip(), _utc_now_iso())
+            if not sqlite_fallback_enabled():
+                return
+        except Exception:
+            if not sqlite_fallback_enabled():
+                raise
+
     with _get_conn() as conn:
         conn.execute(
             "UPDATE password_reset_tokens SET sent_at = ? WHERE token = ?",
@@ -1065,6 +1456,28 @@ def mark_password_reset_sent(token: str) -> None:
 def reset_password_from_token(token: str, new_password: str) -> dict:
     safe_token = (token or "").strip()
     ensure_strong_password(new_password)
+
+    if should_read_from_postgres("auth", safe_token):
+        try:
+            row = pg_get_password_reset_token_record(safe_token)
+            if row is None:
+                raise ValueError("Token de recuperacion invalido")
+            if row.get("used_at"):
+                raise ValueError("Este enlace de recuperacion ya fue usado")
+
+            expires_at = datetime.fromisoformat(str(row.get("expires_at") or ""))
+            if expires_at < datetime.now(timezone.utc):
+                raise ValueError("El enlace de recuperacion expiro")
+
+            new_salt = secrets.token_hex(16)
+            new_hash = _hash_password(new_password, new_salt)
+            pg_update_user_password(int(row.get("user_id") or 0), new_hash, new_salt)
+            pg_mark_password_reset_used_record(safe_token, _utc_now_iso())
+            if not sqlite_fallback_enabled():
+                return {"ok": True, "email": str(row.get("email") or "")}
+        except Exception:
+            if not sqlite_fallback_enabled():
+                raise
 
     with _get_conn() as conn:
         row = conn.execute(
@@ -1184,6 +1597,28 @@ def create_recharge_payment_intent(
     currency: str,
     checkout_url: str,
 ) -> None:
+    created_at = _utc_now_iso()
+    updated_at = created_at
+    use_pg_primary = should_read_from_postgres("wallet", reference)
+
+    if use_pg_primary:
+        try:
+            pg_create_recharge_payment_intent_record(
+                reference=reference,
+                user_id=int(user_id),
+                amount_cop=int(amount_cop),
+                amount_in_cents=int(amount_in_cents),
+                currency=currency,
+                checkout_url=checkout_url,
+                created_at=created_at,
+                updated_at=updated_at,
+            )
+            if not sqlite_fallback_enabled():
+                return
+        except Exception:
+            if not sqlite_fallback_enabled():
+                raise
+
     with _get_conn() as conn:
         conn.execute(
             """
@@ -1200,13 +1635,38 @@ def create_recharge_payment_intent(
                 int(amount_in_cents),
                 currency,
                 checkout_url,
-                _utc_now_iso(),
-                _utc_now_iso(),
+                created_at,
+                updated_at,
             ),
         )
 
 
 def get_recharge_payment_intent(reference: str) -> dict | None:
+    if should_read_from_postgres("wallet", reference):
+        try:
+            row = pg_get_recharge_payment_intent_record(reference)
+            if row is not None:
+                return {
+                    "id": int(row.get("id") or 0),
+                    "reference": str(row.get("reference") or ""),
+                    "user_id": int(row.get("user_id") or 0),
+                    "amount_cop": int(row.get("amount_cop") or 0),
+                    "amount_in_cents": int(row.get("amount_in_cents") or 0),
+                    "currency": str(row.get("currency") or ""),
+                    "status": str(row.get("status") or ""),
+                    "transaction_id": str(row.get("transaction_id") or ""),
+                    "checkout_url": str(row.get("checkout_url") or ""),
+                    "gateway_payload": str(row.get("gateway_payload") or ""),
+                    "created_at": str(row.get("created_at") or ""),
+                    "updated_at": str(row.get("updated_at") or ""),
+                    "settled_at": str(row.get("settled_at") or ""),
+                }
+            if not sqlite_fallback_enabled():
+                return None
+        except Exception:
+            if not sqlite_fallback_enabled():
+                return None
+
     with _get_conn() as conn:
         row = conn.execute(
             """
@@ -1239,6 +1699,34 @@ def get_recharge_payment_intent(reference: str) -> dict | None:
 
 
 def list_pending_recharge_payment_intents(user_id: int, limit: int = 30) -> list[dict]:
+    if should_read_from_postgres("wallet", user_id):
+        try:
+            rows = pg_list_pending_recharge_payment_intents(int(user_id), limit=int(limit))
+            if rows:
+                return [
+                    {
+                        "id": int(row.get("id") or 0),
+                        "reference": str(row.get("reference") or ""),
+                        "user_id": int(row.get("user_id") or 0),
+                        "amount_cop": int(row.get("amount_cop") or 0),
+                        "amount_in_cents": int(row.get("amount_in_cents") or 0),
+                        "currency": str(row.get("currency") or ""),
+                        "status": str(row.get("status") or ""),
+                        "transaction_id": str(row.get("transaction_id") or ""),
+                        "checkout_url": str(row.get("checkout_url") or ""),
+                        "gateway_payload": str(row.get("gateway_payload") or ""),
+                        "created_at": str(row.get("created_at") or ""),
+                        "updated_at": str(row.get("updated_at") or ""),
+                        "settled_at": str(row.get("settled_at") or ""),
+                    }
+                    for row in rows
+                ]
+            if not sqlite_fallback_enabled():
+                return []
+        except Exception:
+            if not sqlite_fallback_enabled():
+                return []
+
     safe_limit = max(1, min(200, int(limit)))
     with _get_conn() as conn:
         rows = conn.execute(
@@ -1274,6 +1762,15 @@ def list_pending_recharge_payment_intents(user_id: int, limit: int = 30) -> list
 
 
 def set_recharge_payment_status(reference: str, status: str, transaction_id: str = "", gateway_payload: str = "") -> None:
+    if should_read_from_postgres("wallet", reference):
+        try:
+            pg_set_recharge_payment_status_record(reference, status, transaction_id, gateway_payload)
+            if not sqlite_fallback_enabled():
+                return
+        except Exception:
+            if not sqlite_fallback_enabled():
+                raise
+
     with _get_conn() as conn:
         conn.execute(
             """
@@ -1291,6 +1788,15 @@ def settle_recharge_if_approved(
     transaction_id: str,
     gateway_payload: str,
 ) -> dict:
+    if should_read_from_postgres("wallet", reference):
+        try:
+            result = pg_settle_recharge_if_approved_record(reference=reference, transaction_id=transaction_id, gateway_payload=gateway_payload)
+            if not sqlite_fallback_enabled():
+                return result
+        except Exception:
+            if not sqlite_fallback_enabled():
+                raise
+
     with _get_conn() as conn:
         conn.isolation_level = None
         conn.execute("BEGIN IMMEDIATE")
