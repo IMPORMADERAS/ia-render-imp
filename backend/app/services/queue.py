@@ -41,6 +41,36 @@ def get_optional_redis_connection():
         return None
 
 
+def _retry_intervals_seconds() -> list[int]:
+    raw = (settings.rq_retry_intervals_seconds or "").strip()
+    if not raw:
+        return [10, 30]
+
+    values: list[int] = []
+    for item in raw.split(","):
+        token = item.strip()
+        if not token:
+            continue
+        try:
+            seconds = int(token)
+        except ValueError:
+            continue
+        if seconds > 0:
+            values.append(seconds)
+
+    return values or [10, 30]
+
+
+def _build_retry_policy():
+    attempts = max(1, int(settings.rq_retry_max_attempts))
+    if attempts <= 1:
+        return None
+
+    from rq import Retry
+
+    return Retry(max=attempts, interval=_retry_intervals_seconds())
+
+
 def enqueue_or_background(
     background_tasks: BackgroundTasks,
     func: Callable[..., Any],
@@ -59,11 +89,13 @@ def enqueue_or_background(
                 connection=get_redis_connection(),
                 default_timeout=max(60, int(settings.rq_job_timeout_seconds)),
             )
+            retry_policy = _build_retry_policy()
             job = queue.enqueue(
                 func,
                 *args,
                 **kwargs,
                 job_timeout=max(60, int(settings.rq_job_timeout_seconds)),
+                retry=retry_policy,
             )
             return str(job.id)
         except Exception as exc:

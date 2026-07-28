@@ -48,8 +48,12 @@ class Settings(BaseSettings):
     redis_url: str = ""
     queue_require_redis: bool = False
     rq_default_queue: str = "default"
-    rq_queues: str = "default,render,video,music,influencer"
+    rq_queues: str = "render,video,music,influencer,chat,thumbnail,default"
     rq_job_timeout_seconds: int = 1800
+    rq_retry_max_attempts: int = 3
+    rq_retry_intervals_seconds: str = "10,30"
+    rq_worker_queue_profile: str = "all"
+    rq_worker_with_scheduler: bool = True
 
     postgres_mirror_enabled: bool = False
     postgres_dsn: str = ""
