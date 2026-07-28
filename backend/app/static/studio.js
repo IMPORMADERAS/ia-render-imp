@@ -209,6 +209,7 @@ let activeRenderJobId = null;
 let authMode = "login";
 let currentUser = null;
 const wompiWatchingRefs = new Set();
+let paymentNoticeTimer = null;
 
 const WOMPI_APPROVAL_POLL_MS = 3000;
 const WOMPI_APPROVAL_WAIT_MS = 120000;
@@ -217,6 +218,165 @@ function hideImageElement(imgEl) {
   if (!imgEl) return;
   imgEl.removeAttribute("src");
   imgEl.style.display = "none";
+}
+
+function ensurePaymentNoticeUi() {
+  let container = document.getElementById("payment-notice-container");
+  if (!container) {
+    container = document.createElement("div");
+    container.id = "payment-notice-container";
+    container.className = "payment-notice-overlay";
+    container.setAttribute("aria-live", "polite");
+    container.setAttribute("aria-atomic", "true");
+    container.addEventListener("click", (event) => {
+      if (event.target === container) {
+        container.classList.remove("is-open");
+        container.innerHTML = "";
+      }
+    });
+    document.body.appendChild(container);
+  }
+
+  if (!document.getElementById("payment-notice-styles")) {
+    const styles = document.createElement("style");
+    styles.id = "payment-notice-styles";
+    styles.textContent = `
+      #payment-notice-container {
+        position: fixed;
+        inset: 0;
+        z-index: 13000;
+        display: none;
+        align-items: center;
+        justify-content: center;
+        padding: 18px;
+        background: rgba(4, 9, 7, 0.62);
+        backdrop-filter: blur(4px);
+        -webkit-backdrop-filter: blur(4px);
+      }
+      #payment-notice-container.is-open {
+        display: flex;
+      }
+      .payment-notice {
+        min-width: 300px;
+        max-width: min(560px, calc(100vw - 36px));
+        pointer-events: auto;
+        border-radius: 16px;
+        border: 1px solid rgba(255, 255, 255, 0.16);
+        box-shadow: 0 18px 44px rgba(0, 0, 0, 0.4);
+        padding: 14px 16px;
+        color: #f3fff8;
+        font-size: 0.94rem;
+        line-height: 1.45;
+        animation: paymentNoticeIn 220ms ease-out;
+        backdrop-filter: blur(4px);
+        -webkit-backdrop-filter: blur(4px);
+      }
+      .payment-notice--info { background: rgba(17, 28, 47, 0.95); }
+      .payment-notice--success { background: rgba(11, 49, 30, 0.95); }
+      .payment-notice--warning { background: rgba(71, 49, 10, 0.95); }
+      .payment-notice--error { background: rgba(77, 24, 24, 0.95); }
+      .payment-notice__head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+      }
+      .payment-notice__title {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        margin: 0;
+        font-weight: 700;
+      }
+      .payment-notice__message {
+        margin: 6px 0 0;
+        color: #d8efe2;
+      }
+      .payment-notice__close {
+        border: 0;
+        border-radius: 999px;
+        width: 24px;
+        height: 24px;
+        cursor: pointer;
+        color: #e9fff3;
+        background: rgba(255, 255, 255, 0.14);
+      }
+      @keyframes paymentNoticeIn {
+        from { transform: translateY(-10px); opacity: 0; }
+        to { transform: translateY(0); opacity: 1; }
+      }
+    `;
+    document.head.appendChild(styles);
+  }
+
+  return container;
+}
+
+function showPaymentNotice(message, type = "info", options = {}) {
+  const safeMessage = String(message || "").trim();
+  if (!safeMessage) return;
+
+  const { durationMs = 5600 } = options;
+  const container = ensurePaymentNoticeUi();
+  if (!container) return;
+
+  container.innerHTML = "";
+  container.classList.add("is-open");
+
+  const titles = {
+    info: "Proceso de pago",
+    success: "Pago actualizado",
+    warning: "Pago pendiente",
+    error: "Pago no procesado",
+  };
+  const icons = {
+    info: "•",
+    success: "✓",
+    warning: "!",
+    error: "x",
+  };
+  const safeType = ["info", "success", "warning", "error"].includes(type) ? type : "info";
+
+  const notice = document.createElement("section");
+  notice.className = `payment-notice payment-notice--${safeType}`;
+  notice.setAttribute("role", safeType === "error" ? "alert" : "status");
+  notice.innerHTML = `
+    <div class="payment-notice__head">
+      <p class="payment-notice__title"><span aria-hidden="true">${icons[safeType]}</span>${titles[safeType]}</p>
+      <button class="payment-notice__close" type="button" aria-label="Cerrar aviso">×</button>
+    </div>
+    <p class="payment-notice__message"></p>
+  `;
+
+  const messageEl = notice.querySelector(".payment-notice__message");
+  if (messageEl) {
+    messageEl.textContent = safeMessage;
+  }
+
+  const closeBtn = notice.querySelector(".payment-notice__close");
+  if (closeBtn) {
+    closeBtn.addEventListener("click", () => {
+      if (paymentNoticeTimer) {
+        clearTimeout(paymentNoticeTimer);
+        paymentNoticeTimer = null;
+      }
+      container.classList.remove("is-open");
+      notice.remove();
+    });
+  }
+
+  container.appendChild(notice);
+
+  if (paymentNoticeTimer) {
+    clearTimeout(paymentNoticeTimer);
+  }
+  if (durationMs > 0) {
+    paymentNoticeTimer = setTimeout(() => {
+      container.classList.remove("is-open");
+      notice.remove();
+      paymentNoticeTimer = null;
+    }, durationMs);
+  }
 }
 
 const DEFAULT_PRICING = {
@@ -1322,13 +1482,13 @@ async function watchWompiReference(reference, options = {}) {
     if (credited && currentUser) {
       currentUser.balance_cop = Number(result.balance_cop || currentUser.balance_cop || 0);
       updateAuthUi();
-      window.alert("Pago aprobado por Wompi. Tu saldo fue acreditado.");
+      showPaymentNotice("Pago aprobado por Wompi. Tu saldo fue acreditado.", "success");
       return;
     }
 
     if (showPendingTimeoutAlert) {
       const safeStatus = String(result?.status || "PENDING");
-      window.alert(`Tu pago sigue en ${safeStatus}. Se acreditara apenas Wompi lo marque aprobado.`);
+      showPaymentNotice(`Tu pago sigue en ${safeStatus}. Se acreditara apenas Wompi lo marque aprobado.`, "warning", { durationMs: 7000 });
     }
   } finally {
     wompiWatchingRefs.delete(reference);
@@ -1403,7 +1563,7 @@ async function handleWompiReturnFromCheckout() {
       showPendingTimeoutAlert: true,
     });
   } catch {
-    window.alert("No se pudo confirmar el estado de tu pago en Wompi.");
+    showPaymentNotice("No se pudo confirmar el estado de tu pago en Wompi.", "error", { durationMs: 7600 });
   } finally {
     const url = new URL(window.location.href);
     url.searchParams.delete("wompi_ref");
@@ -1428,7 +1588,7 @@ async function syncPendingWompiPayments(showToast = true) {
       currentUser.balance_cop = Number(data?.balance_cop || currentUser.balance_cop || 0);
       updateAuthUi();
       if (showToast) {
-        window.alert(`Se acreditaron ${creditedCount} recarga(s) pendiente(s) de Wompi a tu cuenta.`);
+        showPaymentNotice(`Se acreditaron ${creditedCount} recarga(s) pendiente(s) de Wompi a tu cuenta.`, "success");
       }
     }
   } catch {
@@ -1866,6 +2026,7 @@ rechargeForm?.addEventListener("submit", async (event) => {
   rechargeSubmit.disabled = true;
 
   try {
+    showPaymentNotice("Conectando con checkout seguro de Wompi...", "info", { durationMs: 4200 });
     const redirectUrl = `${window.location.origin}/studio`;
     const resp = await fetch("/payments/wompi/checkout", {
       method: "POST",
@@ -1875,14 +2036,14 @@ rechargeForm?.addEventListener("submit", async (event) => {
 
     if (!resp.ok) {
       const errorText = await readApiError(resp);
-      window.alert(`No se pudo recargar: ${errorText}`);
+      showPaymentNotice(`No se pudo recargar: ${errorText}`, "error", { durationMs: 7600 });
       rechargeSubmit.disabled = false;
       return;
     }
 
     const data = await resp.json();
     if (!data.checkout_url) {
-      window.alert("No se pudo obtener el checkout de Wompi.");
+      showPaymentNotice("No se pudo obtener el checkout de Wompi.", "error", { durationMs: 7600 });
       rechargeSubmit.disabled = false;
       return;
     }
@@ -1895,6 +2056,7 @@ rechargeForm?.addEventListener("submit", async (event) => {
       "popup=yes,width=520,height=760,menubar=no,toolbar=no,location=yes,status=no,resizable=yes,scrollbars=yes"
     );
     if (!popup) {
+      showPaymentNotice("Abriendo pasarela de pago en la misma pestaña...", "info", { durationMs: 3600 });
       window.location.href = data.checkout_url;
       return;
     }
@@ -1909,7 +2071,7 @@ rechargeForm?.addEventListener("submit", async (event) => {
       popupRef: null,
     }).catch(() => {});
   } catch {
-    window.alert("No se pudo recargar en este momento.");
+    showPaymentNotice("No se pudo recargar en este momento.", "error", { durationMs: 7600 });
     rechargeSubmit.disabled = false;
     return;
   }
