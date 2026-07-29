@@ -1,4 +1,5 @@
 import json
+import mimetypes
 import sqlite3
 from pathlib import Path
 from typing import Any
@@ -102,6 +103,18 @@ def _iter_records(table: str, user_id: int | None = None) -> list[tuple[str, dic
         if isinstance(payload, dict):
             items.append((str(row["id"]), payload))
     return items
+
+
+def _asset_exists(payload: dict[str, Any], path_key: str, storage_key_key: str, storage_url_key: str) -> bool:
+    raw_path = str(payload.get(path_key) or "").strip()
+    if raw_path and Path(raw_path).exists():
+        return True
+
+    if str(payload.get(storage_key_key) or "").strip():
+        return True
+    if str(payload.get(storage_url_key) or "").strip():
+        return True
+    return False
 
 
 def _migrate_legacy_json_file(table: str, file_path: Path) -> None:
@@ -308,13 +321,18 @@ def list_user_generation_history(user_id: int, limit: int = 100) -> list[dict[st
                     continue
 
                 module = "img2img"
-                if payload.get("material_names"):
+                if str(payload.get("project_module") or "") == "intelligent_project":
+                    module = "intelligent_project"
+                elif payload.get("material_names"):
                     module = "materials"
                 elif not payload.get("input_image"):
                     module = "text2img"
 
                 out_path = str(payload.get("output_image") or "")
-                has_file = bool(out_path and Path(out_path).exists())
+                image_available = _asset_exists(payload, "output_image", "output_storage_key", "output_storage_url")
+                video_available = _asset_exists(payload, "output_video", "video_storage_key", "video_storage_url")
+                report_available = _asset_exists(payload, "report_pdf", "report_storage_key", "report_storage_url")
+                has_file = image_available or video_available or report_available
 
                 items.append(
                     {
@@ -329,6 +347,9 @@ def list_user_generation_history(user_id: int, limit: int = 100) -> list[dict[st
                         "meta": {
                             "sequence": payload.get("sequence"),
                             "prompt": payload.get("prompt"),
+                            "has_image": image_available,
+                            "has_video": video_available,
+                            "has_report": report_available,
                         },
                     }
                 )
@@ -390,13 +411,18 @@ def list_user_generation_history(user_id: int, limit: int = 100) -> list[dict[st
             continue
 
         module = "img2img"
-        if payload.get("material_names"):
+        if str(payload.get("project_module") or "") == "intelligent_project":
+            module = "intelligent_project"
+        elif payload.get("material_names"):
             module = "materials"
         elif not payload.get("input_image"):
             module = "text2img"
 
         out_path = str(payload.get("output_image") or "")
-        has_file = bool(out_path and Path(out_path).exists())
+        image_available = _asset_exists(payload, "output_image", "output_storage_key", "output_storage_url")
+        video_available = _asset_exists(payload, "output_video", "video_storage_key", "video_storage_url")
+        report_available = _asset_exists(payload, "report_pdf", "report_storage_key", "report_storage_url")
+        has_file = image_available or video_available or report_available
 
         items.append(
             {
@@ -411,6 +437,9 @@ def list_user_generation_history(user_id: int, limit: int = 100) -> list[dict[st
                 "meta": {
                     "sequence": payload.get("sequence"),
                     "prompt": payload.get("prompt"),
+                    "has_image": image_available,
+                    "has_video": video_available,
+                    "has_report": report_available,
                 },
             }
         )
@@ -468,7 +497,35 @@ def list_user_generation_history(user_id: int, limit: int = 100) -> list[dict[st
     return items[:safe_limit]
 
 
-def get_user_generation_download(user_id: int, output_type: str, output_id: str) -> tuple[Path, str]:
+def _job_asset_target(record: dict[str, Any], output_id: str, asset: str) -> tuple[str, str, str, str]:
+    safe_asset = str(asset or "image").strip().lower()
+    seq = record.get("sequence") or str(output_id)[:8]
+
+    if safe_asset == "video":
+        return (
+            str(record.get("output_video") or ""),
+            str(record.get("video_storage_key") or ""),
+            str(record.get("video_storage_url") or ""),
+            f"IA-IMP-proyecto-video-{str(output_id)[:8]}.mp4",
+        )
+
+    if safe_asset == "report":
+        return (
+            str(record.get("report_pdf") or ""),
+            str(record.get("report_storage_key") or ""),
+            str(record.get("report_storage_url") or ""),
+            f"IA-IMP-proyecto-reporte-{str(output_id)[:8]}.pdf",
+        )
+
+    return (
+        str(record.get("output_image") or ""),
+        str(record.get("output_storage_key") or ""),
+        str(record.get("output_storage_url") or ""),
+        f"IA-IMP-{seq}{Path(str(record.get('output_image') or '')).suffix or '.png'}",
+    )
+
+
+def get_user_generation_download(user_id: int, output_type: str, output_id: str, asset: str = "image") -> tuple[Path, str]:
     """Returns (file_path, download_filename). Raises ValueError on ownership/not-found/unavailable."""
     uid = int(user_id)
     safe_id = str(output_id).strip()
@@ -480,14 +537,12 @@ def get_user_generation_download(user_id: int, output_type: str, output_id: str)
             raise ValueError("Generacion no encontrada")
         if int(record.get("billed_user_id") or 0) != uid:
             raise ValueError("No tienes permiso para descargar este archivo")
-        raw_path = str(record.get("output_image") or "")
+        raw_path, _storage_key, _storage_url, filename = _job_asset_target(record, safe_id, asset)
         if not raw_path:
             raise ValueError("Archivo no disponible: la generacion aun no ha terminado")
         p = Path(raw_path)
         if not p.exists():
             raise ValueError("Archivo expirado: Railway reinicio el contenedor. Vuelvelo a generar.")
-        seq = record.get("sequence") or safe_id[:8]
-        filename = f"IA-IMP-{seq}{p.suffix or '.png'}"
         return p, filename
 
     if safe_type == "anim":
@@ -524,15 +579,11 @@ def get_user_generation_download(user_id: int, output_type: str, output_id: str)
     raise ValueError("Tipo de generacion invalido")
 
 
-def get_record_download_target(record: dict[str, Any], output_type: str, output_id: str) -> dict[str, Any]:
+def get_record_download_target(record: dict[str, Any], output_type: str, output_id: str, asset: str = "image") -> dict[str, Any]:
     safe_type = str(output_type).strip().lower()
 
     if safe_type == "job":
-        raw_path = str(record.get("output_image") or "")
-        storage_key = str(record.get("output_storage_key") or "")
-        storage_url = str(record.get("output_storage_url") or "")
-        seq = record.get("sequence") or str(output_id)[:8]
-        filename = f"IA-IMP-{seq}{Path(raw_path).suffix or '.png'}"
+        raw_path, storage_key, storage_url, filename = _job_asset_target(record, output_id, asset)
         media_type = "application/octet-stream"
         if raw_path:
             media_type = mimetypes.guess_type(raw_path)[0] or media_type

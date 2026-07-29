@@ -23,9 +23,15 @@ DEFAULT_PRICING: dict[str, Any] = {
         "influencer": 0.9,
         "chat": 0.01,
         "chat_image": 0.04,
+        "intelligent_project": 10.0,
     },
     "module_price_cop": {
         "chat_image": 250,
+        "intelligent_project": 50000,
+    },
+    "material_brand_price_cop_m2": {
+        "duratex": 83000,
+        "arauco": 65500,
     },
     "music_duration_usd": {
         "8": 0.08,
@@ -51,6 +57,7 @@ DEFAULT_PRICING: dict[str, Any] = {
         "music": "Musica IA (Music 2.6)",
         "chat": "Pachy IA (GPT-4o)",
         "chat_image": "Pachy IA (Imagen)",
+        "intelligent_project": "Proyecto Inteligente",
     },
 }
 

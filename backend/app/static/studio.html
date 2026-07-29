@@ -92,6 +92,7 @@
           <div class="top-actions" aria-label="Acciones de cuenta y precios">
             <div id="account-chip" class="account-chip" hidden>No has iniciado sesion</div>
             <button id="btn-prices" type="button" class="top-action-btn">Precios</button>
+            <button id="btn-smart-project" type="button" class="top-action-btn top-action-btn--neon">Proyecto Inteligente</button>
             <button id="btn-recharge" type="button" class="top-action-btn top-action-btn--ghost">Recarga</button>
             <button id="btn-account" type="button" class="top-action-btn top-action-btn--ghost" hidden>Mi cuenta</button>
             <button id="btn-studio-imp" type="button" class="top-action-btn" hidden>Studio IMP Gratis</button>
@@ -109,6 +110,7 @@
           <button id="tab-img2img" class="mode-tab active" type="button" role="tab" aria-selected="true">Imagen a Imagen</button>
           <button id="tab-img2vid" class="mode-tab" type="button" role="tab" aria-selected="false">Imagen a Video</button>
           <button id="tab-influencer" class="mode-tab" type="button" role="tab" aria-selected="false">Influencer</button>
+          <button id="tab-intelligent" class="mode-tab mode-tab--neon" type="button" role="tab" aria-selected="false">Proyecto Inteligente</button>
           <button id="tab-txt2img" class="mode-tab" type="button" role="tab" aria-selected="false">Texto a Imagen</button>
           <button id="tab-music" class="mode-tab" type="button" role="tab" aria-selected="false">Musica IA</button>
           <button id="tab-chat" class="mode-tab" type="button" role="tab" aria-selected="false">Pachy IA</button>
@@ -385,6 +387,88 @@
 
             <video id="influencer-result-video" class="anim-video" controls loop hidden></video>
             <a id="influencer-download" class="download disabled" href="#" download hidden>Descargar video influencer</a>
+          </form>
+        </div>
+
+        <div id="mode-intelligent" class="mode-pane" hidden>
+          <form id="intelligent-form" class="form" novalidate>
+            <p class="model-note">Concepto + materiales + render + video + metrado + PDF.</p>
+
+            <label class="field">
+              <span>Concepto del proyecto</span>
+              <textarea id="intelligent-prompt" rows="5" required placeholder="Ej: Cocina 6x4 estilo contemporáneo cálido, tonos madera natural, isla central y luz indirecta."></textarea>
+            </label>
+
+            <section class="materials-section" aria-labelledby="intelligent-materials-heading">
+              <div class="materials-head">
+                <h3 id="intelligent-materials-heading">Materiales (1 a 2)</h3>
+                <span id="intelligent-materials-count" class="materials-count">0/2</span>
+              </div>
+
+              <label class="field">
+                <span>Catálogo de materiales</span>
+                <p class="hint">Selecciona 1 o 2 texturas desde el mismo catálogo de Imagen a Imagen.</p>
+              </label>
+
+              <div id="intelligent-materials-dropdown" class="materials-dropdown">
+                <button
+                  id="intelligent-materials-toggle"
+                  class="materials-toggle"
+                  type="button"
+                  aria-expanded="false"
+                  aria-controls="intelligent-materials-panel"
+                >
+                  <span>Ver catálogo de materiales</span>
+                  <span id="intelligent-materials-toggle-icon" class="materials-toggle-icon">▾</span>
+                </button>
+                <div id="intelligent-materials-panel" class="materials-panel" hidden>
+                  <div class="materials-search-wrap">
+                    <input
+                      id="intelligent-materials-search"
+                      class="materials-search"
+                      type="search"
+                      placeholder="Buscar material o marca (ej: Arauco, Roble, Duratex)"
+                      autocomplete="off"
+                      spellcheck="false"
+                    />
+                  </div>
+                  <div id="intelligent-materials-library" class="materials-grid" aria-live="polite"></div>
+                </div>
+              </div>
+
+              <div id="intelligent-materials-selected" class="materials-selected" aria-live="polite"></div>
+            </section>
+
+            <div class="grid-2">
+              <label class="field">
+                <span>Duración del video</span>
+                <select id="intelligent-duration">
+                  <option value="5" selected>5 segundos</option>
+                  <option value="8">8 segundos</option>
+                  <option value="15">15 segundos</option>
+                </select>
+              </label>
+            </div>
+
+            <label class="field consent-check">
+              <span>
+                <input id="intelligent-include-video" type="checkbox" checked />
+                Incluir recorrido en video.
+              </span>
+            </label>
+
+            <button id="intelligent-submit-btn" type="submit">Generar Proyecto Inteligente</button>
+            <p id="intelligent-status" class="status idle">Listo para crear proyecto</p>
+
+            <div id="intelligent-links" class="grid-2" hidden>
+              <a id="intelligent-video-link" class="download disabled" href="#" target="_blank" rel="noopener">Descargar video del proyecto</a>
+              <a id="intelligent-report-link" class="download disabled" href="#" target="_blank" rel="noopener">Descargar PDF de metrados</a>
+            </div>
+
+            <div>
+              <p class="detail-label">Metrados estimados</p>
+              <div id="intelligent-quantities" class="chat-help">Aún sin resultados.</div>
+            </div>
           </form>
         </div>
 

@@ -15,6 +15,7 @@ from .routes.music import router as music_router
 from .routes.payments import router as payments_router
 from .routes.materials import router as materials_router
 from .routes.influencer import router as influencer_router
+from .routes.intelligent_project import router as intelligent_project_router
 from .routes.auth import router as auth_router
 from .routes.admin import router as admin_router
 from .services.auth_wallet import init_auth_wallet_db
@@ -180,5 +181,6 @@ app.include_router(music_router)
 app.include_router(payments_router)
 app.include_router(materials_router)
 app.include_router(influencer_router)
+app.include_router(intelligent_project_router)
 app.include_router(admin_router)
 app.include_router(auth_router)

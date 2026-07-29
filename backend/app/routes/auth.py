@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, Cookie, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
@@ -262,14 +262,19 @@ def update_profile(payload: UpdateProfileRequest, user: AuthenticatedUser = Depe
 def download_generation(
     output_type: str,
     output_id: str,
+    asset: str = Query(default="image"),
     user: AuthenticatedUser = Depends(require_authenticated_user),
 ):
     VALID_TYPES = {"job", "anim", "music"}
     if output_type not in VALID_TYPES:
         raise HTTPException(status_code=400, detail="Tipo de generacion invalido")
 
+    safe_asset = str(asset or "image").strip().lower()
+    if output_type == "job" and safe_asset not in {"image", "video", "report"}:
+        raise HTTPException(status_code=400, detail="Asset de descarga invalido")
+
     try:
-        file_path, filename = get_user_generation_download(user.user_id, output_type, output_id)
+        file_path, filename = get_user_generation_download(user.user_id, output_type, output_id, asset=safe_asset)
     except ValueError:
         record = None
         if output_type == "job":
@@ -285,7 +290,7 @@ def download_generation(
         if record is None or int(record.get("billed_user_id") or 0) != int(user.user_id):
             raise HTTPException(status_code=404, detail="Generacion no encontrada")
 
-        target = get_record_download_target(record, output_type, output_id)
+        target = get_record_download_target(record, output_type, output_id, asset=safe_asset)
         remote_url = resolve_download_url(target.get("storage_key") or "", target.get("storage_url") or "")
         if not remote_url:
             raise HTTPException(status_code=404, detail="Archivo no disponible")

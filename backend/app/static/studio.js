@@ -28,12 +28,14 @@ const animDropZonePreview = document.getElementById("anim-drop-zone-preview");
 const tabImg2Img = document.getElementById("tab-img2img");
 const tabImg2Vid = document.getElementById("tab-img2vid");
 const tabInfluencer = document.getElementById("tab-influencer");
+const tabIntelligent = document.getElementById("tab-intelligent");
 const tabTxt2Img = document.getElementById("tab-txt2img");
 const tabMusic = document.getElementById("tab-music");
 const tabChat = document.getElementById("tab-chat");
 const paneImg2Img = document.getElementById("mode-img2img");
 const paneImg2Vid = document.getElementById("mode-img2vid");
 const paneInfluencer = document.getElementById("mode-influencer");
+const paneIntelligent = document.getElementById("mode-intelligent");
 const paneTxt2Img = document.getElementById("mode-txt2img");
 const paneMusic = document.getElementById("mode-music");
 const paneChat = document.getElementById("mode-chat");
@@ -121,6 +123,7 @@ const materialsSearchEl = document.getElementById("materials-search");
 const materialsSelectedEl = document.getElementById("materials-selected");
 const materialsCountEl = document.getElementById("materials-count");
 const btnPrices = document.getElementById("btn-prices");
+const btnSmartProject = document.getElementById("btn-smart-project");
 const btnRecharge = document.getElementById("btn-recharge");
 const btnAccount = document.getElementById("btn-account");
 const btnStudioImp = document.getElementById("btn-studio-imp");
@@ -188,6 +191,24 @@ const accountDeleteStatus = document.getElementById("account-delete-status");
 const accountGenerationsBody = document.getElementById("account-generations-body");
 const accountChatHistoryBody = document.getElementById("account-chat-history-body");
 
+const intelligentForm = document.getElementById("intelligent-form");
+const intelligentPromptEl = document.getElementById("intelligent-prompt");
+const intelligentIncludeVideoEl = document.getElementById("intelligent-include-video");
+const intelligentDurationEl = document.getElementById("intelligent-duration");
+const intelligentSubmitBtn = document.getElementById("intelligent-submit-btn");
+const intelligentStatusEl = document.getElementById("intelligent-status");
+const intelligentLinksEl = document.getElementById("intelligent-links");
+const intelligentVideoLinkEl = document.getElementById("intelligent-video-link");
+const intelligentReportLinkEl = document.getElementById("intelligent-report-link");
+const intelligentQuantitiesEl = document.getElementById("intelligent-quantities");
+const intelligentMaterialsToggleEl = document.getElementById("intelligent-materials-toggle");
+const intelligentMaterialsPanelEl = document.getElementById("intelligent-materials-panel");
+const intelligentMaterialsToggleIconEl = document.getElementById("intelligent-materials-toggle-icon");
+const intelligentMaterialsSearchEl = document.getElementById("intelligent-materials-search");
+const intelligentMaterialsLibraryEl = document.getElementById("intelligent-materials-library");
+const intelligentMaterialsSelectedEl = document.getElementById("intelligent-materials-selected");
+const intelligentMaterialsCountEl = document.getElementById("intelligent-materials-count");
+
 let pollingTimer = null;
 let currentAnimJobId = null;
 let animPollingTimer = null;
@@ -204,8 +225,11 @@ let chatAttachedFiles = [];
 let materialItems = [];
 const selectedMaterialNames = [];
 let materialSearchQuery = "";
+const intelligentSelectedMaterialNames = [];
+let intelligentMaterialSearchQuery = "";
 let currentMode = "img2img";
 let activeRenderJobId = null;
+let intelligentPollingTimer = null;
 let authMode = "login";
 let currentUser = null;
 const wompiWatchingRefs = new Set();
@@ -392,6 +416,7 @@ const DEFAULT_PRICING = {
     text2img: 0.039,
     influencer: 0.9,
     chat: 0.01,
+    intelligent_project: 10.0,
   },
   module_price_cop: {},
   music_duration_usd: { 8: 0.08, 15: 0.15, 30: 0.3, 60: 0.6, 120: 1.2, 180: 1.8 },
@@ -658,6 +683,7 @@ function getPricingCatalog() {
     { key: "img2img", module: "Imagen a Imagen", usdBase: Number(moduleUsd.img2img ?? DEFAULT_PRICING.module_usd.img2img) },
     { key: "materials", module: "Materiales IA", usdBase: Number(moduleUsd.materials ?? DEFAULT_PRICING.module_usd.materials) },
     { key: "text2img", module: "Texto a Imagen", usdBase: Number(moduleUsd.text2img ?? DEFAULT_PRICING.module_usd.text2img) },
+    { key: "intelligent_project", module: "Proyecto Inteligente", usdBase: Number(moduleUsd.intelligent_project ?? DEFAULT_PRICING.module_usd.intelligent_project) },
     { key: "influencer", module: "Influencer IA", usdBase: Number(moduleUsd.influencer ?? DEFAULT_PRICING.module_usd.influencer) },
     { key: "chat", module: "Pachy IA", usdBase: Number(moduleUsd.chat ?? DEFAULT_PRICING.module_usd.chat) },
   ];
@@ -750,6 +776,17 @@ function normalizeSearchText(value) {
 
 function getFilteredMaterialItems() {
   const query = normalizeSearchText(materialSearchQuery);
+  if (!query) return materialItems;
+
+  return materialItems.filter((item) => {
+    const brand = item.brand || (item.relative_path || "").split("/")[0] || "";
+    const haystack = normalizeSearchText(`${item.name} ${brand} ${item.relative_path}`);
+    return haystack.includes(query);
+  });
+}
+
+function getFilteredIntelligentMaterialItems() {
+  const query = normalizeSearchText(intelligentMaterialSearchQuery);
   if (!query) return materialItems;
 
   return materialItems.filter((item) => {
@@ -856,6 +893,120 @@ function renderMaterialsLibrary() {
   }
 }
 
+function updateIntelligentMaterialsCount() {
+  if (!intelligentMaterialsCountEl) return;
+  intelligentMaterialsCountEl.textContent = `${intelligentSelectedMaterialNames.length}/2`;
+}
+
+function setIntelligentMaterialsDropdownState(expanded) {
+  if (!intelligentMaterialsToggleEl || !intelligentMaterialsPanelEl) return;
+  intelligentMaterialsPanelEl.hidden = !expanded;
+  intelligentMaterialsToggleEl.setAttribute("aria-expanded", String(expanded));
+  if (intelligentMaterialsToggleIconEl) {
+    intelligentMaterialsToggleIconEl.textContent = expanded ? "▴" : "▾";
+  }
+  if (expanded && intelligentMaterialsSearchEl) {
+    requestAnimationFrame(() => intelligentMaterialsSearchEl.focus());
+  }
+}
+
+function renderIntelligentSelectedMaterials() {
+  if (!intelligentMaterialsSelectedEl) return;
+  intelligentMaterialsSelectedEl.innerHTML = "";
+
+  if (!intelligentSelectedMaterialNames.length) {
+    const note = document.createElement("p");
+    note.className = "hint";
+    note.textContent = "Selecciona 1 o 2 materiales para Proyecto Inteligente.";
+    intelligentMaterialsSelectedEl.appendChild(note);
+    return;
+  }
+
+  for (const rel of intelligentSelectedMaterialNames) {
+    const item = materialItems.find((m) => m.relative_path === rel);
+    if (!item) continue;
+
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "material-chip";
+    chip.textContent = `${item.name} ×`;
+    chip.addEventListener("click", () => {
+      const idx = intelligentSelectedMaterialNames.indexOf(rel);
+      if (idx >= 0) {
+        intelligentSelectedMaterialNames.splice(idx, 1);
+        renderIntelligentMaterialsLibrary();
+        renderIntelligentSelectedMaterials();
+        updateIntelligentMaterialsCount();
+      }
+    });
+    intelligentMaterialsSelectedEl.appendChild(chip);
+  }
+}
+
+function renderIntelligentMaterialsLibrary() {
+  if (!intelligentMaterialsLibraryEl) return;
+
+  intelligentMaterialsLibraryEl.innerHTML = "";
+  if (!materialItems.length) {
+    const empty = document.createElement("p");
+    empty.className = "hint";
+    empty.textContent = "No se encontraron archivos en la carpeta Materiales.";
+    intelligentMaterialsLibraryEl.appendChild(empty);
+    return;
+  }
+
+  const filteredItems = getFilteredIntelligentMaterialItems();
+  if (!filteredItems.length) {
+    const empty = document.createElement("p");
+    empty.className = "hint";
+    empty.textContent = "No hay coincidencias con tu busqueda.";
+    intelligentMaterialsLibraryEl.appendChild(empty);
+    return;
+  }
+
+  for (const item of filteredItems) {
+    const card = document.createElement("button");
+    card.type = "button";
+    card.className = "material-card";
+    card.setAttribute("aria-pressed", String(intelligentSelectedMaterialNames.includes(item.relative_path)));
+    if (intelligentSelectedMaterialNames.includes(item.relative_path)) {
+      card.classList.add("selected");
+    }
+
+    const brandLabel = String(item.brand || (item.relative_path || "").split("/")[0] || "General");
+    card.innerHTML = `
+      <img src="${item.url}" alt="${item.name}" loading="lazy" />
+      <span>${brandLabel} · ${item.name}</span>
+    `;
+
+    const cardImage = card.querySelector("img");
+    if (cardImage) {
+      cardImage.addEventListener("error", () => {
+        cardImage.style.display = "none";
+      });
+    }
+
+    card.addEventListener("click", () => {
+      const idx = intelligentSelectedMaterialNames.indexOf(item.relative_path);
+      if (idx >= 0) {
+        intelligentSelectedMaterialNames.splice(idx, 1);
+      } else {
+        if (intelligentSelectedMaterialNames.length >= 2) {
+          setStatus("Solo puedes seleccionar hasta 2 materiales", "failed");
+          return;
+        }
+        intelligentSelectedMaterialNames.push(item.relative_path);
+      }
+
+      renderIntelligentMaterialsLibrary();
+      renderIntelligentSelectedMaterials();
+      updateIntelligentMaterialsCount();
+    });
+
+    intelligentMaterialsLibraryEl.appendChild(card);
+  }
+}
+
 async function loadMaterialsLibrary() {
   if (!materialsLibraryEl) return;
 
@@ -870,11 +1021,17 @@ async function loadMaterialsLibrary() {
     renderMaterialsLibrary();
     renderSelectedMaterials();
     updateMaterialsCount();
+    renderIntelligentMaterialsLibrary();
+    renderIntelligentSelectedMaterials();
+    updateIntelligentMaterialsCount();
   } catch {
     materialItems = [];
     renderMaterialsLibrary();
     renderSelectedMaterials();
     updateMaterialsCount();
+    renderIntelligentMaterialsLibrary();
+    renderIntelligentSelectedMaterials();
+    updateIntelligentMaterialsCount();
   }
 }
 
@@ -895,6 +1052,21 @@ if (materialsSearchEl) {
   materialsSearchEl.addEventListener("input", () => {
     materialSearchQuery = materialsSearchEl.value || "";
     renderMaterialsLibrary();
+  });
+}
+
+if (intelligentMaterialsToggleEl && intelligentMaterialsPanelEl) {
+  setIntelligentMaterialsDropdownState(false);
+  intelligentMaterialsToggleEl.addEventListener("click", () => {
+    const expanded = intelligentMaterialsToggleEl.getAttribute("aria-expanded") === "true";
+    setIntelligentMaterialsDropdownState(!expanded);
+  });
+}
+
+if (intelligentMaterialsSearchEl) {
+  intelligentMaterialsSearchEl.addEventListener("input", () => {
+    intelligentMaterialSearchQuery = intelligentMaterialsSearchEl.value || "";
+    renderIntelligentMaterialsLibrary();
   });
 }
 
@@ -1013,6 +1185,15 @@ function updateAuthTabUi() {
 }
 
 function updateAuthUi() {
+  const setAccountChipText = (text, fullText = "") => {
+    if (!accountChip) return;
+    const safeText = String(text || "").trim();
+    const safeFullText = String(fullText || safeText).trim();
+    accountChip.textContent = safeText;
+    accountChip.title = safeFullText;
+    accountChip.setAttribute("aria-label", safeFullText);
+  };
+
   if (currentUser) {
     if (btnLogin) btnLogin.hidden = true;
     if (btnLogout) btnLogout.hidden = false;
@@ -1022,7 +1203,10 @@ function updateAuthUi() {
       accountChip.hidden = false;
       const fullName = `${currentUser.first_name || ""} ${currentUser.last_name || ""}`.trim();
       const displayName = fullName || currentUser.username;
-      accountChip.textContent = `${displayName} · Saldo ${formatCop(currentUser.balance_cop || 0)}`;
+      setAccountChipText(
+        `${displayName} · Saldo ${formatCop(currentUser.balance_cop || 0)}`,
+        `${displayName} · Saldo ${formatCop(currentUser.balance_cop || 0)}`
+      );
     }
     if (btnRecharge) btnRecharge.disabled = false;
     return;
@@ -1034,7 +1218,7 @@ function updateAuthUi() {
   if (btnStudioImp) btnStudioImp.hidden = true;
   if (accountChip) {
     accountChip.hidden = false;
-    accountChip.textContent = "No has iniciado sesion";
+    setAccountChipText("No has iniciado sesion");
   }
 }
 
@@ -1168,16 +1352,33 @@ function renderAccountSummary(data) {
         const outputId = String(item.id || "");
         const hasFile = Boolean(item.has_file);
         const isCompleted = String(item.status || "").toLowerCase() === "completed";
+        const moduleName = String(item.module || "").toLowerCase();
+        const meta = item?.meta && typeof item.meta === "object" ? item.meta : {};
+
+        const hasImage = Boolean(meta.has_image ?? hasFile);
+        const hasVideo = Boolean(meta.has_video);
+        const hasReport = Boolean(meta.has_report);
 
         let fileCell = `<td class="gen-file-cell gen-file-cell--none">—</td>`;
         if (isCompleted && outputType && outputId) {
-          if (hasFile) {
-            fileCell = `<td class="gen-file-cell">
-              <a class="gen-download-btn"
-                 href="/auth/downloads/${encodeURIComponent(outputType)}/${encodeURIComponent(outputId)}"
-                 download
-                 title="Descargar archivo">⬇ Descargar</a>
-            </td>`;
+          if (moduleName === "intelligent_project") {
+            const links = [];
+            if (hasImage) {
+              links.push(`<a class="gen-download-btn" href="/auth/downloads/${encodeURIComponent(outputType)}/${encodeURIComponent(outputId)}?asset=image" download title="Descargar render">⬇ Render</a>`);
+            }
+            if (hasVideo) {
+              links.push(`<a class="gen-download-btn" href="/auth/downloads/${encodeURIComponent(outputType)}/${encodeURIComponent(outputId)}?asset=video" download title="Descargar video">⬇ Video</a>`);
+            }
+            if (hasReport) {
+              links.push(`<a class="gen-download-btn" href="/auth/downloads/${encodeURIComponent(outputType)}/${encodeURIComponent(outputId)}?asset=report" download title="Descargar PDF">⬇ PDF</a>`);
+            }
+            if (links.length) {
+              fileCell = `<td class="gen-file-cell">${links.join(" ")}</td>`;
+            } else {
+              fileCell = `<td class="gen-file-cell gen-file-cell--expired" title="Los archivos no estan disponibles en este momento.">⏳ Sin archivos</td>`;
+            }
+          } else if (hasFile) {
+            fileCell = `<td class="gen-file-cell"><a class="gen-download-btn" href="/auth/downloads/${encodeURIComponent(outputType)}/${encodeURIComponent(outputId)}" download title="Descargar archivo">⬇ Descargar</a></td>`;
           } else {
             fileCell = `<td class="gen-file-cell gen-file-cell--expired" title="El archivo fue eliminado cuando Railway reinicio el contenedor. Configurar un Railway Volume evita esto.">⏳ Expirado</td>`;
           }
@@ -2202,10 +2403,12 @@ function setMode(mode) {
   const isChat = mode === "chat";
   const isMusic = mode === "music";
   const isInfluencer = mode === "influencer";
+  const isIntelligent = mode === "intelligent_project";
 
   tabImg2Img?.classList.toggle("active", mode === "img2img");
   tabImg2Vid?.classList.toggle("active", mode === "img2vid");
   tabInfluencer?.classList.toggle("active", isInfluencer);
+  tabIntelligent?.classList.toggle("active", isIntelligent);
   tabTxt2Img?.classList.toggle("active", mode === "txt2img");
   tabMusic?.classList.toggle("active", isMusic);
   tabChat?.classList.toggle("active", isChat);
@@ -2213,6 +2416,7 @@ function setMode(mode) {
   tabImg2Img?.setAttribute("aria-selected", String(mode === "img2img"));
   tabImg2Vid?.setAttribute("aria-selected", String(mode === "img2vid"));
   tabInfluencer?.setAttribute("aria-selected", String(isInfluencer));
+  tabIntelligent?.setAttribute("aria-selected", String(isIntelligent));
   tabTxt2Img?.setAttribute("aria-selected", String(mode === "txt2img"));
   tabMusic?.setAttribute("aria-selected", String(isMusic));
   tabChat?.setAttribute("aria-selected", String(isChat));
@@ -2220,6 +2424,7 @@ function setMode(mode) {
   paneImg2Img?.classList.toggle("active", mode === "img2img");
   paneImg2Vid?.classList.toggle("active", mode === "img2vid");
   paneInfluencer?.classList.toggle("active", isInfluencer);
+  paneIntelligent?.classList.toggle("active", isIntelligent);
   paneTxt2Img?.classList.toggle("active", mode === "txt2img");
   paneMusic?.classList.toggle("active", isMusic);
   paneChat?.classList.toggle("active", isChat);
@@ -2227,6 +2432,7 @@ function setMode(mode) {
   if (paneImg2Img) paneImg2Img.hidden = mode !== "img2img";
   if (paneImg2Vid) paneImg2Vid.hidden = mode !== "img2vid";
   if (paneInfluencer) paneInfluencer.hidden = !isInfluencer;
+  if (paneIntelligent) paneIntelligent.hidden = !isIntelligent;
   if (paneTxt2Img) paneTxt2Img.hidden = mode !== "txt2img";
   if (paneMusic) paneMusic.hidden = !isMusic;
   if (paneChat) paneChat.hidden = !isChat;
@@ -2239,9 +2445,11 @@ function setMode(mode) {
 tabImg2Img?.addEventListener("click", () => setMode("img2img"));
 tabImg2Vid?.addEventListener("click", () => setMode("img2vid"));
 tabInfluencer?.addEventListener("click", () => setMode("influencer"));
+tabIntelligent?.addEventListener("click", () => setMode("intelligent_project"));
 tabTxt2Img?.addEventListener("click", () => setMode("txt2img"));
 tabMusic?.addEventListener("click", () => setMode("music"));
 tabChat?.addEventListener("click", () => setMode("chat"));
+btnSmartProject?.addEventListener("click", () => setMode("intelligent_project"));
 
 function applyDroppedFile(file) {
   if (!file || !file.type.startsWith("image/") || !dropZoneInput) return;
@@ -3594,6 +3802,199 @@ chatForm.addEventListener("submit", async (event) => {
     if (sentOk) {
       clearChatAttachments();
     }
+  }
+});
+
+function stopIntelligentPolling() {
+  if (intelligentPollingTimer) {
+    clearInterval(intelligentPollingTimer);
+    intelligentPollingTimer = null;
+  }
+}
+
+function resetIntelligentLinks() {
+  if (intelligentLinksEl) intelligentLinksEl.hidden = true;
+  if (intelligentVideoLinkEl) {
+    intelligentVideoLinkEl.href = "#";
+    intelligentVideoLinkEl.classList.add("disabled");
+  }
+  if (intelligentReportLinkEl) {
+    intelligentReportLinkEl.href = "#";
+    intelligentReportLinkEl.classList.add("disabled");
+  }
+}
+
+function renderIntelligentQuantities(rows) {
+  if (!intelligentQuantitiesEl) return;
+  const items = Array.isArray(rows) ? rows : [];
+  if (!items.length) {
+    intelligentQuantitiesEl.textContent = "Aun sin estimaciones.";
+    return;
+  }
+  const chunks = items.map((row) => {
+    const material = row?.material || "Material";
+    const zona = row?.zona || "Zona";
+    const m2 = Number(row?.m2_estimados || 0);
+    return `${material}: ${zona} - ${m2} m2`;
+  });
+  intelligentQuantitiesEl.textContent = chunks.join(" | ");
+}
+
+function pollIntelligentProject(jobId) {
+  stopIntelligentPolling();
+  intelligentPollingTimer = setInterval(async () => {
+    try {
+      const resp = await fetch(`/intelligent-project/${jobId}`);
+      if (!resp.ok) {
+        const err = await readApiError(resp);
+        if (intelligentStatusEl) {
+          intelligentStatusEl.textContent = `Error: ${err}`;
+          intelligentStatusEl.className = "status failed";
+        }
+        stopIntelligentPolling();
+        if (intelligentSubmitBtn) intelligentSubmitBtn.disabled = false;
+        return;
+      }
+
+      const data = await resp.json();
+      const progress = Number(data.progress || 0);
+      if (intelligentStatusEl) {
+        intelligentStatusEl.textContent = `Proyecto Inteligente: ${data.stage || "procesando"} (${progress}%)`;
+        intelligentStatusEl.className = "status processing";
+      }
+
+      progressFill.style.width = `${Math.max(0, Math.min(100, progress))}%`;
+      progressText.textContent = `${Math.max(0, Math.min(100, progress))}%`;
+      stageEl.textContent = `Etapa: ${data.stage || "procesando"}`;
+      etaEl.textContent = "ETA: --";
+      setStatus("Proyecto Inteligente en ejecución...", "processing");
+
+      if (data.status === "completed") {
+        stopIntelligentPolling();
+        showImageElement(outputPreview, `/jobs/${jobId}/image?t=${Date.now()}`);
+        hideImageElement(inputPreview);
+        downloadLink.href = `/jobs/${jobId}/image`;
+        downloadLink.setAttribute("download", `IA-IMP-proyecto-${jobId.slice(0, 8)}.png`);
+        downloadLink.classList.remove("disabled");
+        setStatus("Proyecto Inteligente completado", "completed");
+
+        if (intelligentLinksEl) intelligentLinksEl.hidden = false;
+        if (intelligentReportLinkEl) {
+          intelligentReportLinkEl.href = `/intelligent-project/${jobId}/report`;
+          intelligentReportLinkEl.classList.remove("disabled");
+        }
+        if (intelligentVideoLinkEl) {
+          if (data.output_video) {
+            intelligentVideoLinkEl.href = `/intelligent-project/${jobId}/video`;
+            intelligentVideoLinkEl.classList.remove("disabled");
+          } else {
+            intelligentVideoLinkEl.href = "#";
+            intelligentVideoLinkEl.classList.add("disabled");
+          }
+        }
+        renderIntelligentQuantities(data.quantities || []);
+        if (intelligentStatusEl) {
+          intelligentStatusEl.textContent = "Proyecto Inteligente completado.";
+          intelligentStatusEl.className = "status completed";
+        }
+        if (intelligentSubmitBtn) intelligentSubmitBtn.disabled = false;
+      } else if (data.status === "failed") {
+        stopIntelligentPolling();
+        const err = data.error || "error desconocido";
+        setStatus(`Fallo: ${err}`, "failed");
+        if (intelligentStatusEl) {
+          intelligentStatusEl.textContent = `Fallo: ${err}`;
+          intelligentStatusEl.className = "status failed";
+        }
+        if (intelligentSubmitBtn) intelligentSubmitBtn.disabled = false;
+      }
+    } catch {
+      stopIntelligentPolling();
+      if (intelligentStatusEl) {
+        intelligentStatusEl.textContent = "Error de red consultando el proyecto.";
+        intelligentStatusEl.className = "status failed";
+      }
+      if (intelligentSubmitBtn) intelligentSubmitBtn.disabled = false;
+    }
+  }, 2000);
+}
+
+intelligentForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+
+  if (!requireLogin("crear Proyecto Inteligente")) {
+    return;
+  }
+
+  const prompt = String(intelligentPromptEl?.value || "").trim();
+  if (!prompt) {
+    if (intelligentStatusEl) {
+      intelligentStatusEl.textContent = "Describe el concepto del proyecto.";
+      intelligentStatusEl.className = "status failed";
+    }
+    return;
+  }
+
+  const materialNames = [...intelligentSelectedMaterialNames].slice(0, 2);
+  if (!materialNames.length) {
+    if (intelligentStatusEl) {
+      intelligentStatusEl.textContent = "Selecciona al menos 1 material del catálogo.";
+      intelligentStatusEl.className = "status failed";
+    }
+    return;
+  }
+
+  if (intelligentSubmitBtn) intelligentSubmitBtn.disabled = true;
+  resetIntelligentLinks();
+  renderIntelligentQuantities([]);
+  setStatus("Creando Proyecto Inteligente...", "processing");
+  progressFill.style.width = "8%";
+  progressText.textContent = "8%";
+  stageEl.textContent = "Etapa: en cola";
+  etaEl.textContent = "ETA: --";
+
+  if (intelligentStatusEl) {
+    intelligentStatusEl.textContent = "Enviando solicitud...";
+    intelligentStatusEl.className = "status processing";
+  }
+
+  try {
+    const resp = await fetch("/intelligent-project/run", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        prompt,
+        material_names: materialNames,
+        include_video: Boolean(intelligentIncludeVideoEl?.checked),
+        duration_seconds: Number(intelligentDurationEl?.value || 5),
+      }),
+    });
+
+    if (!resp.ok) {
+      const err = await readApiError(resp);
+      throw new Error(err || "No se pudo crear el proyecto inteligente");
+    }
+
+    const data = await resp.json();
+    const jobId = data.job_id;
+    if (!jobId) {
+      throw new Error("Respuesta sin job_id");
+    }
+
+    if (intelligentStatusEl) {
+      intelligentStatusEl.textContent = "Proyecto en cola...";
+      intelligentStatusEl.className = "status processing";
+    }
+    pollIntelligentProject(jobId);
+    setMode("intelligent_project");
+  } catch (err) {
+    if (intelligentSubmitBtn) intelligentSubmitBtn.disabled = false;
+    const message = err instanceof Error ? err.message : "No se pudo crear el proyecto";
+    if (intelligentStatusEl) {
+      intelligentStatusEl.textContent = message;
+      intelligentStatusEl.className = "status failed";
+    }
+    setStatus(message, "failed");
   }
 });
 

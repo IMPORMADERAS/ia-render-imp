@@ -11,6 +11,14 @@ from .benchmark_mode import benchmark_duration_seconds, is_benchmark_mode_enable
 from .metrics import record_job_outcome
 from .music_generator import music_generator
 from .object_storage import guess_media_type, is_object_storage_enabled, upload_file
+from .project_intelligence import (
+    estimate_material_quantities,
+    project_total_m2,
+    project_total_budget_cop,
+    resolve_material_paths,
+    summarize_brand_totals,
+    write_architectural_project_pdf,
+)
 from .prompt_builder import build_arch_prompt, sanitize_negative_prompt
 from .renderer import renderer
 from .storage import update_anim, update_job, update_music
@@ -699,3 +707,170 @@ def run_influencer_job(
         record_job_outcome("influencer", "failed", 0)
     finally:
         release_generation_slot("influencer", int(user_id))
+
+
+def run_intelligent_project_job(
+    *,
+    job_id: str,
+    user_id: int,
+    billed_amount: int,
+    output_image_path: str,
+    output_video_path: str,
+    report_pdf_path: str,
+    prompt: str,
+    material_names: list[str],
+    include_video: bool,
+    duration_seconds: int,
+) -> None:
+    try:
+        update_job(
+            job_id,
+            {
+                "status": "processing",
+                "progress": 12,
+                "stage": "Analizando concepto y materiales",
+                "started_at": _utc_now_iso(),
+                "updated_at": _utc_now_iso(),
+            },
+        )
+
+        selected_material_names = [str(name or "").strip() for name in material_names if str(name or "").strip()][:2]
+        if not selected_material_names:
+            raise RuntimeError("Debes seleccionar al menos 1 material para Proyecto Inteligente")
+
+        selected_material_paths = resolve_material_paths(selected_material_names)
+        if not selected_material_paths:
+            raise RuntimeError("No se encontraron los materiales seleccionados en el catalogo")
+
+        selected_material_names = [
+            str(Path(path).resolve().relative_to(Path(__file__).resolve().parents[3] / "Materiales").as_posix())
+            for path in selected_material_paths
+        ]
+
+        full_prompt = build_arch_prompt(prompt, "commercial", "afternoon")
+
+        update_job(
+            job_id,
+            {
+                "progress": 35,
+                "stage": "Generando render del proyecto",
+                "selected_material_names": selected_material_names,
+                "updated_at": _utc_now_iso(),
+            },
+        )
+
+        draft_image_path = str(Path(output_image_path).with_name(f"{Path(output_image_path).stem}_draft{Path(output_image_path).suffix or '.png'}"))
+
+        renderer.generate_text_to_image(
+            output_image_path=draft_image_path,
+            prompt=full_prompt,
+            negative_prompt=sanitize_negative_prompt("low quality, blurry, distorted geometry, cartoon"),
+            steps=24,
+            guidance_scale=7.0,
+            quality="balanced",
+            seed=None,
+        )
+
+        render_meta = renderer.generate_material_edit(
+            output_image_path=output_image_path,
+            input_image_path=draft_image_path,
+            material_paths=selected_material_paths,
+            prompt=full_prompt,
+            material_mode="mix",
+            material_plan="Combinacion equilibrada segun el concepto del proyecto.",
+            material_names=selected_material_names,
+            quality="balanced",
+            seed=None,
+        )
+
+        try:
+            Path(draft_image_path).unlink(missing_ok=True)
+        except Exception:
+            pass
+
+        image_asset = _upload_asset_if_enabled(output_image_path, f"projects/{job_id}/render{Path(output_image_path).suffix or '.png'}")
+
+        video_asset = None
+        if include_video:
+            update_job(
+                job_id,
+                {
+                    "progress": 62,
+                    "stage": "Generando recorrido en video",
+                    "updated_at": _utc_now_iso(),
+                },
+            )
+            animator.animate_replicate(
+                image_path=output_image_path,
+                output_video_path=output_video_path,
+                prompt="Slow cinematic camera movement across the redesigned architectural space",
+                duration_seconds=max(3, min(15, int(duration_seconds))),
+            )
+            video_asset = _upload_asset_if_enabled(output_video_path, f"projects/{job_id}/video{Path(output_video_path).suffix or '.mp4'}")
+
+        quantities = estimate_material_quantities(
+            prompt,
+            selected_material_names,
+            render_image_path=output_image_path,
+        )
+        total_m2 = project_total_m2(quantities)
+        brand_totals = summarize_brand_totals(quantities)
+        estimated_total_cop = project_total_budget_cop(quantities)
+
+        write_architectural_project_pdf(
+            file_path=report_pdf_path,
+            project_id=job_id,
+            prompt=prompt,
+            selected_materials=selected_material_names,
+            quantities=quantities,
+            render_image_path=output_image_path,
+        )
+        report_asset = _upload_asset_if_enabled(report_pdf_path, f"projects/{job_id}/reporte.pdf")
+
+        duration = int(render_meta.get("duration_seconds", 1))
+        update_job(
+            job_id,
+            {
+                "status": "completed",
+                "progress": 100,
+                "stage": "Proyecto Inteligente completado",
+                "output_image": output_image_path,
+                "output_video": output_video_path if include_video else None,
+                "report_pdf": report_pdf_path,
+                "selected_material_names": selected_material_names,
+                "quantities": quantities,
+                "materials_budget": quantities,
+                "brand_totals": brand_totals,
+                "estimated_total_cop": estimated_total_cop,
+                "total_m2": total_m2,
+                "model_mode": "intelligent_project",
+                "elapsed_seconds": max(1, duration),
+                "expected_total_seconds": max(1, duration),
+                "output_storage_key": (image_asset or {}).get("storage_key"),
+                "output_storage_url": (image_asset or {}).get("url"),
+                "video_storage_key": (video_asset or {}).get("storage_key"),
+                "video_storage_url": (video_asset or {}).get("url"),
+                "report_storage_key": (report_asset or {}).get("storage_key"),
+                "report_storage_url": (report_asset or {}).get("url"),
+                "completed_at": _utc_now_iso(),
+                "updated_at": _utc_now_iso(),
+            },
+        )
+        record_job_outcome("render", "completed", max(1, duration))
+    except Exception as exc:
+        try:
+            credit_balance(int(user_id), int(billed_amount), "intelligent_project_refund", f"Reembolso por fallo proyecto {job_id}")
+        except Exception:
+            pass
+        update_job(
+            job_id,
+            {
+                "status": "failed",
+                "error": str(exc),
+                "stage": "Fallo en Proyecto Inteligente",
+                "updated_at": _utc_now_iso(),
+            },
+        )
+        record_job_outcome("render", "failed", 0)
+    finally:
+        release_generation_slot("render", int(user_id))

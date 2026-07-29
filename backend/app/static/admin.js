@@ -34,6 +34,7 @@ const priceImg2img = document.getElementById("price-img2img");
 const priceMaterials = document.getElementById("price-materials");
 const priceText2img = document.getElementById("price-text2img");
 const priceInfluencer = document.getElementById("price-influencer");
+const priceIntelligentProject = document.getElementById("price-intelligent-project");
 const priceChat = document.getElementById("price-chat");
 const priceChatImage = document.getElementById("price-chat-image");
 const priceMusic8 = document.getElementById("price-music-8");
@@ -54,6 +55,8 @@ const priceI2vWan2515 = document.getElementById("price-i2v-wan25-15");
 const priceI2vMinimax5 = document.getElementById("price-i2v-minimax-5");
 const priceI2vMinimax8 = document.getElementById("price-i2v-minimax-8");
 const priceI2vMinimax15 = document.getElementById("price-i2v-minimax-15");
+const priceBrandDuratexM2 = document.getElementById("price-brand-duratex-m2");
+const priceBrandAraucoM2 = document.getElementById("price-brand-arauco-m2");
 const adminSearch = document.getElementById("admin-search");
 const adminUsersBody = document.getElementById("admin-users-body");
 const metricUsers = document.getElementById("metric-users");
@@ -371,6 +374,7 @@ function fillCopPricingForm(pricing) {
   if (!pricing) return;
   const moduleUsd = pricing.module_usd || {};
   const moduleCop = pricing.module_price_cop || {};
+  const brandM2 = pricing.material_brand_price_cop_m2 || {};
   const musicUsd = pricing.music_duration_usd || {};
   const musicCop = pricing.music_duration_cop || {};
   const videoUsd = pricing.video_engine_usd_per_second || {};
@@ -400,6 +404,7 @@ function fillCopPricingForm(pricing) {
   setInputValue(priceMaterials, moduleCop.materials ?? toCop(moduleUsd.materials));
   setInputValue(priceText2img, moduleCop.text2img ?? toCop(moduleUsd.text2img));
   setInputValue(priceInfluencer, moduleCop.influencer ?? toCop(moduleUsd.influencer));
+  setInputValue(priceIntelligentProject, moduleCop.intelligent_project ?? toCop(moduleUsd.intelligent_project));
   setInputValue(priceChat, moduleCop.chat ?? toCop(moduleUsd.chat));
   setInputValue(priceChatImage, moduleCop.chat_image ?? toCop(moduleUsd.chat_image));
   setInputValue(priceMusic8, musicCop["8"] ?? toCop(musicUsd["8"]));
@@ -421,12 +426,15 @@ function fillCopPricingForm(pricing) {
   setInputValue(priceI2vMinimax5, videoCop["minimax/video-01-live"]?.["5"] ?? toCop(safeNumber(videoUsd["minimax/video-01-live"]) * 5));
   setInputValue(priceI2vMinimax8, videoCop["minimax/video-01-live"]?.["8"] ?? toCop(safeNumber(videoUsd["minimax/video-01-live"]) * 8));
   setInputValue(priceI2vMinimax15, videoCop["minimax/video-01-live"]?.["15"] ?? toCop(safeNumber(videoUsd["minimax/video-01-live"]) * 15));
+  setInputValue(priceBrandDuratexM2, brandM2.duratex ?? 83000);
+  setInputValue(priceBrandAraucoM2, brandM2.arauco ?? 65500);
 }
 
 function buildPricingFromCopForm() {
   const base = pricingCache ? JSON.parse(JSON.stringify(pricingCache)) : {};
   base.module_usd = base.module_usd || {};
   base.module_price_cop = {};
+  base.material_brand_price_cop_m2 = base.material_brand_price_cop_m2 || {};
   base.music_duration_usd = base.music_duration_usd || {};
   base.music_duration_cop = {};
   base.video_engine_usd_per_second = base.video_engine_usd_per_second || {};
@@ -437,6 +445,7 @@ function buildPricingFromCopForm() {
     materials: parseCopInput(priceMaterials),
     text2img: parseCopInput(priceText2img),
     influencer: parseCopInput(priceInfluencer),
+    intelligent_project: parseCopInput(priceIntelligentProject),
     chat: parseCopInput(priceChat),
     chat_image: parseCopInput(priceChatImage),
   };
@@ -445,6 +454,7 @@ function buildPricingFromCopForm() {
   base.module_usd.materials = copToUsd(moduleCop.materials, base);
   base.module_usd.text2img = copToUsd(moduleCop.text2img, base);
   base.module_usd.influencer = copToUsd(moduleCop.influencer, base);
+  base.module_usd.intelligent_project = copToUsd(moduleCop.intelligent_project, base);
   base.module_usd.chat = copToUsd(moduleCop.chat, base);
   base.module_usd.chat_image = copToUsd(moduleCop.chat_image, base);
 
@@ -504,6 +514,11 @@ function buildPricingFromCopForm() {
   base.video_engine_usd_per_second["wan-video/wan-2.2-i2v-fast"] = averagePerSecond("wan-video/wan-2.2-i2v-fast");
   base.video_engine_usd_per_second["wan-video/wan-2.5-i2v-fast"] = averagePerSecond("wan-video/wan-2.5-i2v-fast");
   base.video_engine_usd_per_second["minimax/video-01-live"] = averagePerSecond("minimax/video-01-live");
+
+  base.material_brand_price_cop_m2 = {
+    duratex: parseCopInput(priceBrandDuratexM2),
+    arauco: parseCopInput(priceBrandAraucoM2),
+  };
 
   return base;
 }
