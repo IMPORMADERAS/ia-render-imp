@@ -125,6 +125,30 @@ let exportAudioContext = null;
 let exportAudioDestination = null;
 const exportAudioSourceNodes = new WeakMap();
 
+// Bloquear clic derecho
+    document.addEventListener('contextmenu', function(e) {
+    e.preventDefault();
+    });
+
+    // Bloquear teclas comunes de inspección (F12, Ctrl+Shift+I, Ctrl+Shift+J, Ctrl+U)
+    document.addEventListener('keydown', function(e) {
+    // F12
+    if (e.keyCode === 123) {
+        e.preventDefault();
+        return false;
+    }
+    // Ctrl+Shift+I/J/C
+    if (e.ctrlKey && e.shiftKey && (e.key === 'I' || e.key === 'J' || e.key === 'C')) {
+        e.preventDefault();
+        return false;
+    }
+    // Ctrl+U
+    if (e.ctrlKey && e.key === 'u') {
+        e.preventDefault();
+        return false;
+    }
+    });
+
 function getExportAudioBus() {
   if (!exportAudioContext || exportAudioContext.state === "closed") {
     exportAudioContext = new AudioContext();
