@@ -29,7 +29,26 @@ services:
     environment:
       - JOBS_QUEUE_ENABLED=true
       - REDIS_URL=redis://redis:6379/0
-      - RQ_QUEUES=default,render,video,music,influencer
+      - RQ_QUEUES=default,render,video,music,influencer,chat,thumbnail
+    command: ["python", "backend/worker.py"]
+    volumes:
+      - ./backend/data:/app/backend/data
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  worker-intelligent-project:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: ia-render-worker-intelligent-project
+    env_file:
+      - backend/.env
+    environment:
+      - JOBS_QUEUE_ENABLED=true
+      - REDIS_URL=redis://redis:6379/0
+      - RQ_WORKER_QUEUE_PROFILE=intelligent_project
+      - RQ_QUEUES=default,render,intelligent_project,video,music,influencer,chat,thumbnail
     command: ["python", "backend/worker.py"]
     volumes:
       - ./backend/data:/app/backend/data

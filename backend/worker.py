@@ -9,6 +9,7 @@ def _listen_queues() -> list[str]:
     profiles: dict[str, list[str]] = {
         "all": [],
         "render": ["render"],
+        "intelligent_project": ["intelligent_project"],
         "video": ["video", "influencer"],
         "music": ["music"],
         "chat": ["chat"],

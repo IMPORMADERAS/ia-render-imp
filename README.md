@@ -89,7 +89,7 @@ Si quieres habilitar cola distribuida (recomendado para produccion), activa en `
 ```env
 JOBS_QUEUE_ENABLED=true
 REDIS_URL=redis://localhost:6379/0
-RQ_QUEUES=default,render,video,music,influencer
+RQ_QUEUES=default,render,intelligent_project,video,music,influencer,chat,thumbnail
 ```
 
 Para migracion incremental de persistencia critica (dual-write SQLite + Postgres mirror):
