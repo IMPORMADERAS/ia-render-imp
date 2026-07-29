@@ -162,5 +162,43 @@
         IA-IMP 1.0 · Plataforma de IA aplicada a arquitectura, visualizacion comercial y contenido multimedia.
       </footer>
     </main>
+    <script>
+
+      // Bloquear clic derecho
+    document.addEventListener('contextmenu', function(e) {
+    e.preventDefault();
+    });
+
+    // Bloquear teclas comunes de inspección (F12, Ctrl+Shift+I, Ctrl+Shift+J, Ctrl+U)
+    document.addEventListener('keydown', function(e) {
+    // F12
+    if (e.keyCode === 123) {
+        e.preventDefault();
+        return false;
+    }
+    // Ctrl+Shift+I/J/C
+    if (e.ctrlKey && e.shiftKey && (e.key === 'I' || e.key === 'J' || e.key === 'C')) {
+        e.preventDefault();
+        return false;
+    }
+    // Ctrl+U
+    if (e.ctrlKey && e.key === 'u') {
+        e.preventDefault();
+        return false;
+    }
+    });
+
+      
+      (function () {
+        const overlay = document.getElementById("iaimp-maintenance-overlay");
+        const closeBtn = document.getElementById("iaimp-maintenance-close");
+        if (!overlay || !closeBtn) return;
+        overlay.classList.add("is-open");
+        closeBtn.addEventListener("click", function () {
+          overlay.classList.remove("is-open");
+        });
+      })();
+    </script>
+    <script src="/studio-imp-static/app.js"></script>
   </body>
 </html>
