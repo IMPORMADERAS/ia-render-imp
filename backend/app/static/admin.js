@@ -94,6 +94,30 @@ function formatCop(value) {
   }).format(amount);
 }
 
+// Bloquear clic derecho
+    document.addEventListener('contextmenu', function(e) {
+    e.preventDefault();
+    });
+
+    // Bloquear teclas comunes de inspección (F12, Ctrl+Shift+I, Ctrl+Shift+J, Ctrl+U)
+    document.addEventListener('keydown', function(e) {
+    // F12
+    if (e.keyCode === 123) {
+        e.preventDefault();
+        return false;
+    }
+    // Ctrl+Shift+I/J/C
+    if (e.ctrlKey && e.shiftKey && (e.key === 'I' || e.key === 'J' || e.key === 'C')) {
+        e.preventDefault();
+        return false;
+    }
+    // Ctrl+U
+    if (e.ctrlKey && e.key === 'u') {
+        e.preventDefault();
+        return false;
+    }
+    });
+
 function formatDate(value) {
   if (!value) return "--";
   const date = new Date(value);
