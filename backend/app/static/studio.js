@@ -166,6 +166,10 @@ const authResetWrap = document.getElementById("auth-reset-wrap");
 const authResetToken = document.getElementById("auth-reset-token");
 const authResetPassword = document.getElementById("auth-reset-password");
 const authResetPasswordConfirm = document.getElementById("auth-reset-password-confirm");
+const authTwoFactorWrap = document.getElementById("auth-2fa-wrap");
+const authTwoFactorMessage = document.getElementById("auth-2fa-message");
+const authTwoFactorCode = document.getElementById("auth-2fa-code");
+const authTwoFactorResend = document.getElementById("auth-2fa-resend");
 const authSubmit = document.getElementById("auth-submit");
 const authStatus = document.getElementById("auth-status");
 const accountModal = document.getElementById("account-modal");
@@ -232,6 +236,7 @@ let activeRenderJobId = null;
 let intelligentPollingTimer = null;
 let authMode = "login";
 let currentUser = null;
+let authPendingTwoFactor = null;
 const wompiWatchingRefs = new Set();
 let paymentNoticeTimer = null;
 
@@ -1152,8 +1157,32 @@ function setAuthStatus(text, state = "idle") {
   authStatus.className = `status ${state}`;
 }
 
+function clearAuthTwoFactorState() {
+  authPendingTwoFactor = null;
+  if (authTwoFactorCode) authTwoFactorCode.value = "";
+  if (authTwoFactorMessage) {
+    authTwoFactorMessage.textContent = "Ingresa el codigo de 6 digitos enviado a tu correo.";
+  }
+  if (authTwoFactorResend) authTwoFactorResend.disabled = false;
+}
+
+function applyAuthTwoFactorState(payload) {
+  authPendingTwoFactor = {
+    challengeId: String(payload?.challenge_id || "").trim(),
+    emailMasked: String(payload?.email_masked || "tu correo").trim(),
+    expiresAt: String(payload?.expires_at || "").trim(),
+  };
+  if (authTwoFactorMessage) {
+    authTwoFactorMessage.textContent = `Te enviamos un codigo de verificacion a ${authPendingTwoFactor.emailMasked}.`;
+  }
+  if (authTwoFactorCode) {
+    authTwoFactorCode.value = "";
+  }
+}
+
 function updateAuthTabUi() {
   if (!authTabLogin || !authTabRegister || !authSubmit || !authPassword) return;
+  const isTwoFactorPending = Boolean(authPendingTwoFactor?.challengeId);
   const isLogin = authMode === "login";
   const isRegister = authMode === "register";
   const isRecover = authMode === "recover";
@@ -1162,17 +1191,26 @@ function updateAuthTabUi() {
   authTabRegister.classList.toggle("auth-tab--active", isRegister);
   authTabLogin.setAttribute("aria-selected", String(isLogin));
   authTabRegister.setAttribute("aria-selected", String(isRegister));
-  authSubmit.textContent = isRegister ? "Crear cuenta" : isRecover ? "Enviar correo" : isReset ? "Restablecer contraseña" : "Ingresar";
+  authSubmit.textContent = isTwoFactorPending
+    ? "Verificar codigo"
+    : isRegister
+      ? "Crear cuenta"
+      : isRecover
+        ? "Enviar correo"
+        : isReset
+          ? "Restablecer contraseña"
+          : "Ingresar";
   authPassword.setAttribute("autocomplete", isLogin ? "current-password" : "new-password");
-  if (authRegisterFields) authRegisterFields.hidden = !isRegister;
-  if (authPasswordConfirmWrap) authPasswordConfirmWrap.hidden = !isRegister;
-  if (authRecoverWrap) authRecoverWrap.hidden = !isRecover;
-  if (authResetWrap) authResetWrap.hidden = !isReset;
-  if (authLogin?.parentElement) authLogin.parentElement.hidden = isRecover || isReset || isRegister;
-  if (authEmail?.parentElement) authEmail.parentElement.hidden = !isRegister;
-  if (authPassword?.parentElement) authPassword.parentElement.hidden = isRecover || isReset;
-  if (authLogin) authLogin.required = isLogin;
-  if (authPassword) authPassword.required = isLogin || isRegister;
+  if (authRegisterFields) authRegisterFields.hidden = !isRegister || isTwoFactorPending;
+  if (authPasswordConfirmWrap) authPasswordConfirmWrap.hidden = !isRegister || isTwoFactorPending;
+  if (authRecoverWrap) authRecoverWrap.hidden = !isRecover || isTwoFactorPending;
+  if (authResetWrap) authResetWrap.hidden = !isReset || isTwoFactorPending;
+  if (authTwoFactorWrap) authTwoFactorWrap.hidden = !isTwoFactorPending;
+  if (authLogin?.parentElement) authLogin.parentElement.hidden = isRecover || isReset || isRegister || isTwoFactorPending;
+  if (authEmail?.parentElement) authEmail.parentElement.hidden = !isRegister || isTwoFactorPending;
+  if (authPassword?.parentElement) authPassword.parentElement.hidden = isRecover || isReset || isTwoFactorPending;
+  if (authLogin) authLogin.required = isLogin && !isTwoFactorPending;
+  if (authPassword) authPassword.required = (isLogin || isRegister) && !isTwoFactorPending;
   if (authPasswordConfirm) authPasswordConfirm.required = isRegister;
   if (authFirstName) authFirstName.required = isRegister;
   if (authLastName) authLastName.required = isRegister;
@@ -1181,7 +1219,10 @@ function updateAuthTabUi() {
   if (authResetToken) authResetToken.required = isReset;
   if (authResetPassword) authResetPassword.required = isReset;
   if (authResetPasswordConfirm) authResetPasswordConfirm.required = isReset;
-  if (authRecoverToggle) authRecoverToggle.hidden = isRecover || isReset;
+  if (authTwoFactorCode) authTwoFactorCode.required = isTwoFactorPending;
+  if (authRecoverToggle) authRecoverToggle.hidden = isRecover || isReset || isTwoFactorPending;
+  if (authTabLogin) authTabLogin.disabled = isTwoFactorPending;
+  if (authTabRegister) authTabRegister.disabled = isTwoFactorPending;
 }
 
 function updateAuthUi() {
@@ -1224,10 +1265,18 @@ function updateAuthUi() {
 
 function openAuthModal(mode = "login") {
   if (!authModal) return;
+  if (!["login", "register", "recover", "reset"].includes(mode)) {
+    mode = "login";
+  }
+  if (mode !== "login") {
+    clearAuthTwoFactorState();
+  }
   authMode = ["register", "recover", "reset"].includes(mode) ? mode : "login";
   updateAuthTabUi();
   setAuthStatus(
-    authMode === "register"
+    authPendingTwoFactor
+      ? `Codigo enviado a ${authPendingTwoFactor.emailMasked}. Ingresalo para continuar.`
+      : authMode === "register"
       ? "Crea tu cuenta con email y contraseña."
       : authMode === "recover"
         ? "Escribe tu email registrado para recibir el enlace de recuperación."
@@ -1238,7 +1287,9 @@ function openAuthModal(mode = "login") {
   );
   authModal.hidden = false;
   authModal.setAttribute("aria-hidden", "false");
-  if (authMode === "recover") {
+  if (authPendingTwoFactor) {
+    authTwoFactorCode?.focus();
+  } else if (authMode === "recover") {
     authRecoverEmail?.focus();
   } else if (authMode === "reset") {
     authResetToken?.focus();
@@ -1251,6 +1302,7 @@ function closeAuthModal() {
   if (!authModal) return;
   authModal.hidden = true;
   authModal.setAttribute("aria-hidden", "true");
+  clearAuthTwoFactorState();
 }
 
 function closeAccountModal() {
@@ -1995,6 +2047,32 @@ authRecoverToggle?.addEventListener("click", () => {
   openAuthModal("recover");
 });
 
+authTwoFactorResend?.addEventListener("click", async () => {
+  if (!authPendingTwoFactor?.challengeId) return;
+  authTwoFactorResend.disabled = true;
+  setAuthStatus("Reenviando codigo 2FA...", "processing");
+  try {
+    const resp = await fetch("/auth/login/resend-2fa", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ challenge_id: authPendingTwoFactor.challengeId }),
+    });
+    if (!resp.ok) {
+      const err = await readApiError(resp);
+      setAuthStatus(err, "failed");
+      return;
+    }
+    const data = await resp.json();
+    applyAuthTwoFactorState(data);
+    updateAuthTabUi();
+    setAuthStatus(`Nuevo codigo enviado a ${data?.email_masked || "tu correo"}.`, "completed");
+  } catch {
+    setAuthStatus("No se pudo reenviar el codigo 2FA.", "failed");
+  } finally {
+    authTwoFactorResend.disabled = false;
+  }
+});
+
 btnAccount?.addEventListener("click", () => {
   openAccountModal();
 });
@@ -2047,6 +2125,44 @@ authModal?.addEventListener("click", (e) => {
 authForm?.addEventListener("submit", async (event) => {
   event.preventDefault();
   if (!authPassword || !authSubmit) return;
+
+  if (authPendingTwoFactor?.challengeId) {
+    const code = (authTwoFactorCode?.value || "").trim();
+    if (!/^\d{6}$/.test(code)) {
+      setAuthStatus("Ingresa un codigo valido de 6 digitos.", "failed");
+      return;
+    }
+
+    authSubmit.disabled = true;
+    setAuthStatus("Verificando codigo 2FA...", "processing");
+
+    try {
+      const resp = await fetch("/auth/login/verify-2fa", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ challenge_id: authPendingTwoFactor.challengeId, code }),
+      });
+
+      if (!resp.ok) {
+        const err = await readApiError(resp);
+        setAuthStatus(err, "failed");
+        return;
+      }
+
+      const data = await resp.json();
+      clearAuthTwoFactorState();
+      currentUser = data?.user || null;
+      updateAuthUi();
+      setAuthStatus("Acceso verificado correctamente.", "completed");
+      closeAuthModal();
+      await refreshCurrentUser();
+    } catch {
+      setAuthStatus("No se pudo verificar el codigo 2FA.", "failed");
+    } finally {
+      authSubmit.disabled = false;
+    }
+    return;
+  }
 
   if (authMode === "recover") {
     const email = (authRecoverEmail?.value || "").trim();
@@ -2192,6 +2308,15 @@ authForm?.addEventListener("submit", async (event) => {
     }
 
     const data = await resp.json();
+    if (authMode === "login" && data?.requires_2fa) {
+      applyAuthTwoFactorState(data);
+      updateAuthTabUi();
+      setAuthStatus(`Te enviamos un codigo a ${data?.email_masked || "tu correo"}.`, "completed");
+      authSubmit.disabled = false;
+      authTwoFactorCode?.focus();
+      return;
+    }
+
     currentUser = data?.user || null;
     updateAuthUi();
     setAuthStatus("Sesion iniciada correctamente.", "completed");

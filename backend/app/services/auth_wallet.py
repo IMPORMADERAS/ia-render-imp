@@ -164,6 +164,21 @@ def init_auth_wallet_db() -> None:
                             created_at TEXT NOT NULL
                         );
 
+                        CREATE TABLE IF NOT EXISTS login_2fa_challenges (
+                            challenge_id TEXT PRIMARY KEY,
+                            user_id INTEGER NOT NULL,
+                            email TEXT NOT NULL,
+                            code_hash TEXT NOT NULL,
+                            salt TEXT NOT NULL,
+                            attempts INTEGER NOT NULL DEFAULT 0,
+                            max_attempts INTEGER NOT NULL DEFAULT 5,
+                            expires_at TEXT NOT NULL,
+                            last_sent_at TEXT NOT NULL,
+                            created_at TEXT NOT NULL,
+                            consumed_at TEXT,
+                            FOREIGN KEY(user_id) REFERENCES users(id)
+                        );
+
                         CREATE TABLE IF NOT EXISTS chat_history (
                             id INTEGER PRIMARY KEY AUTOINCREMENT,
                             user_id INTEGER NOT NULL,
@@ -200,6 +215,8 @@ def init_auth_wallet_db() -> None:
             )
         conn.execute("CREATE INDEX IF NOT EXISTS idx_chat_history_user ON chat_history(user_id, id DESC)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_chat_history_conv ON chat_history(user_id, conversation_id, id ASC)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_login_2fa_user ON login_2fa_challenges(user_id, created_at DESC)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_login_2fa_exp ON login_2fa_challenges(expires_at)")
 
 
 def _normalize_username(username: str) -> str:
@@ -660,6 +677,231 @@ def send_low_balance_notification(
         footer_note="Notificacion automatica de saldo para continuidad operativa.",
     )
     return send_email_notification(email, "Alerta de saldo bajo IA-IMP", mail["text"], html_body=mail["html"])
+
+
+def _mask_email(email: str) -> str:
+    raw = str(email or "").strip()
+    if "@" not in raw:
+        return "***"
+    local, domain = raw.split("@", 1)
+    if len(local) <= 2:
+        local_masked = (local[:1] + "*") if local else "***"
+    else:
+        local_masked = local[:2] + ("*" * max(2, len(local) - 2))
+    return f"{local_masked}@{domain}"
+
+
+def _hash_login_2fa_code(code: str, salt: str) -> str:
+    digest = hashlib.sha256(f"{salt}:{str(code or '').strip()}".encode("utf-8")).hexdigest()
+    return digest
+
+
+def _generate_login_2fa_code() -> str:
+    return f"{secrets.randbelow(1_000_000):06d}"
+
+
+def start_login_2fa_challenge(user: dict, app_base_url: str = "") -> dict:
+    user_id = int(user.get("user_id") or 0)
+    if user_id <= 0:
+        raise ValueError("Usuario invalido para 2FA")
+
+    email = _normalize_email(str(user.get("email") or ""))
+    first_name = str(user.get("first_name") or "")
+    last_name = str(user.get("last_name") or "")
+
+    now = datetime.now(timezone.utc)
+    expires_at = now + timedelta(minutes=10)
+    challenge_id = secrets.token_urlsafe(28)
+    code = _generate_login_2fa_code()
+    salt = secrets.token_hex(16)
+    code_hash = _hash_login_2fa_code(code, salt)
+
+    with _get_conn() as conn:
+        conn.execute(
+            """
+            UPDATE login_2fa_challenges
+            SET consumed_at = ?
+            WHERE user_id = ? AND consumed_at IS NULL
+            """,
+            (now.isoformat(), user_id),
+        )
+        conn.execute(
+            """
+            INSERT INTO login_2fa_challenges (
+                challenge_id, user_id, email, code_hash, salt, attempts, max_attempts,
+                expires_at, last_sent_at, created_at, consumed_at
+            )
+            VALUES (?, ?, ?, ?, ?, 0, 5, ?, ?, ?, NULL)
+            """,
+            (challenge_id, user_id, email, code_hash, salt, expires_at.isoformat(), now.isoformat(), now.isoformat()),
+        )
+
+    name = _full_name(first_name, last_name)
+    login_url = (app_base_url or "").strip() or "https://iaimp.impormaderasltda.com/studio"
+    mail = _build_email_template(
+        title="Codigo de verificacion IA-IMP",
+        greeting=f"Hola {name},",
+        message_lines=[
+            "Recibimos un intento de inicio de sesion en tu cuenta.",
+            "Ingresa este codigo de 6 digitos para continuar. Vence en 10 minutos.",
+        ],
+        highlights={
+            "Codigo 2FA": code,
+            "Validez": "10 minutos",
+            "Fecha (UTC)": now.isoformat(),
+        },
+        cta_label="Abrir IA-IMP",
+        cta_url=login_url,
+        footer_note="Si no intentaste iniciar sesion, ignora este correo y cambia tu contraseña.",
+    )
+    delivery = send_email_notification(email, "Codigo de verificacion IA-IMP", mail["text"], html_body=mail["html"])
+
+    return {
+        "challenge_id": challenge_id,
+        "expires_at": expires_at.isoformat(),
+        "expires_in_seconds": 600,
+        "email_masked": _mask_email(email),
+        "delivery": delivery,
+    }
+
+
+def resend_login_2fa_challenge(challenge_id: str, app_base_url: str = "") -> dict:
+    safe_challenge_id = str(challenge_id or "").strip()
+    if not safe_challenge_id:
+        raise ValueError("Challenge 2FA invalido")
+
+    now = datetime.now(timezone.utc)
+    with _get_conn() as conn:
+        row = conn.execute(
+            """
+            SELECT c.challenge_id, c.user_id, c.email, c.attempts, c.max_attempts, c.expires_at, c.last_sent_at, c.consumed_at,
+                   u.first_name, u.last_name
+            FROM login_2fa_challenges c
+            JOIN users u ON u.id = c.user_id
+            WHERE c.challenge_id = ?
+            """,
+            (safe_challenge_id,),
+        ).fetchone()
+
+        if row is None:
+            raise ValueError("Solicitud 2FA no encontrada")
+
+        if row["consumed_at"]:
+            raise ValueError("Este codigo 2FA ya fue utilizado")
+
+        expires_at = datetime.fromisoformat(str(row["expires_at"]))
+        if expires_at <= now:
+            raise ValueError("El codigo 2FA expiro. Inicia sesion nuevamente")
+
+        last_sent_at = datetime.fromisoformat(str(row["last_sent_at"]))
+        if (now - last_sent_at).total_seconds() < 30:
+            raise ValueError("Espera al menos 30 segundos para reenviar el codigo")
+
+        code = _generate_login_2fa_code()
+        salt = secrets.token_hex(16)
+        code_hash = _hash_login_2fa_code(code, salt)
+        new_expiry = now + timedelta(minutes=10)
+
+        conn.execute(
+            """
+            UPDATE login_2fa_challenges
+            SET code_hash = ?, salt = ?, attempts = 0, expires_at = ?, last_sent_at = ?
+            WHERE challenge_id = ?
+            """,
+            (code_hash, salt, new_expiry.isoformat(), now.isoformat(), safe_challenge_id),
+        )
+
+    email = _normalize_email(str(row["email"] or ""))
+    name = _full_name(str(row["first_name"] or ""), str(row["last_name"] or ""))
+    login_url = (app_base_url or "").strip() or "https://iaimp.impormaderasltda.com/studio"
+    mail = _build_email_template(
+        title="Nuevo codigo de verificacion IA-IMP",
+        greeting=f"Hola {name},",
+        message_lines=[
+            "Solicitaste un nuevo codigo de inicio de sesion.",
+            "Usa este codigo de 6 digitos para continuar. Vence en 10 minutos.",
+        ],
+        highlights={
+            "Codigo 2FA": code,
+            "Validez": "10 minutos",
+            "Fecha (UTC)": now.isoformat(),
+        },
+        cta_label="Abrir IA-IMP",
+        cta_url=login_url,
+        footer_note="Si no fuiste tu, ignora este correo y protege tu contraseña.",
+    )
+    delivery = send_email_notification(email, "Nuevo codigo de verificacion IA-IMP", mail["text"], html_body=mail["html"])
+
+    return {
+        "challenge_id": safe_challenge_id,
+        "expires_at": new_expiry.isoformat(),
+        "expires_in_seconds": 600,
+        "email_masked": _mask_email(email),
+        "delivery": delivery,
+    }
+
+
+def verify_login_2fa_challenge(challenge_id: str, code: str) -> dict:
+    safe_challenge_id = str(challenge_id or "").strip()
+    safe_code = str(code or "").strip()
+    if not safe_challenge_id:
+        raise ValueError("Challenge 2FA invalido")
+    if not re.fullmatch(r"\d{6}", safe_code):
+        raise ValueError("El codigo debe tener 6 digitos")
+
+    now = datetime.now(timezone.utc)
+    with _get_conn() as conn:
+        row = conn.execute(
+            """
+            SELECT c.challenge_id, c.user_id, c.code_hash, c.salt, c.attempts, c.max_attempts, c.expires_at, c.consumed_at
+            FROM login_2fa_challenges c
+            WHERE c.challenge_id = ?
+            """,
+            (safe_challenge_id,),
+        ).fetchone()
+
+        if row is None:
+            raise ValueError("Solicitud 2FA no encontrada")
+
+        if row["consumed_at"]:
+            raise ValueError("Este codigo ya fue usado. Inicia sesion nuevamente")
+
+        expires_at = datetime.fromisoformat(str(row["expires_at"]))
+        if expires_at <= now:
+            conn.execute(
+                "UPDATE login_2fa_challenges SET consumed_at = ? WHERE challenge_id = ?",
+                (now.isoformat(), safe_challenge_id),
+            )
+            raise ValueError("El codigo expiro. Inicia sesion nuevamente")
+
+        attempts = int(row["attempts"] or 0)
+        max_attempts = int(row["max_attempts"] or 5)
+        if attempts >= max_attempts:
+            raise ValueError("Superaste el numero de intentos permitidos. Inicia sesion nuevamente")
+
+        expected = str(row["code_hash"] or "")
+        provided = _hash_login_2fa_code(safe_code, str(row["salt"] or ""))
+        if not hmac.compare_digest(expected, provided):
+            next_attempts = attempts + 1
+            consumed_at = now.isoformat() if next_attempts >= max_attempts else None
+            conn.execute(
+                "UPDATE login_2fa_challenges SET attempts = ?, consumed_at = COALESCE(consumed_at, ?) WHERE challenge_id = ?",
+                (next_attempts, consumed_at, safe_challenge_id),
+            )
+            remaining = max(0, max_attempts - next_attempts)
+            if remaining <= 0:
+                raise ValueError("Codigo incorrecto. Superaste los intentos permitidos")
+            raise ValueError(f"Codigo incorrecto. Te quedan {remaining} intentos")
+
+        conn.execute(
+            "UPDATE login_2fa_challenges SET consumed_at = ? WHERE challenge_id = ?",
+            (now.isoformat(), safe_challenge_id),
+        )
+
+    profile = get_user_profile(int(row["user_id"] or 0))
+    if not profile:
+        raise ValueError("No se pudo cargar el perfil del usuario")
+    return profile
 
 
 def authenticate_user(login: str, password: str) -> dict | None:

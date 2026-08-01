@@ -910,6 +910,15 @@
             </label>
           </div>
 
+          <div id="auth-2fa-wrap" class="auth-2fa-wrap" hidden>
+            <p id="auth-2fa-message" class="auth-2fa-message">Ingresa el codigo de 6 digitos enviado a tu correo.</p>
+            <label class="field auth-2fa-field">
+              <span>Codigo de verificacion</span>
+              <input id="auth-2fa-code" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="123456" />
+            </label>
+            <button id="auth-2fa-resend" type="button" class="ghost-button">Reenviar codigo</button>
+          </div>
+
           <button id="auth-submit" type="submit">Ingresar</button>
           <button id="auth-recover-toggle" type="button" class="ghost-button">Recuperar contraseña</button>
         </form>

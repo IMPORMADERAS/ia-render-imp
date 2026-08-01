@@ -19,11 +19,14 @@ from ..services.auth_wallet import (
     get_user_balance,
     list_user_chat_history,
     register_user,
+    resend_login_2fa_challenge,
     require_authenticated_user,
     reset_password_from_token,
     send_password_reset_success_notification,
     send_registration_success_notification,
+    start_login_2fa_challenge,
     update_user_profile,
+    verify_login_2fa_challenge,
 )
 from ..services.storage import delete_user_generation_data, get_record_download_target, get_user_generation_download, list_user_generation_history, resolve_download_url
 
@@ -45,6 +48,15 @@ class LoginRequest(BaseModel):
 
 class RechargeRequest(BaseModel):
     amount_cop: int
+
+
+class LoginTwoFactorVerifyRequest(BaseModel):
+    challenge_id: str
+    code: str
+
+
+class LoginTwoFactorResendRequest(BaseModel):
+    challenge_id: str
 
 
 class ChangePasswordRequest(BaseModel):
@@ -109,10 +121,29 @@ def register(payload: RegisterRequest, response: Response):
 
 
 @router.post("/login", response_model=dict)
-def login(payload: LoginRequest, response: Response):
+def login(payload: LoginRequest, request: Request):
     user = authenticate_user(payload.login, payload.password)
     if user is None:
         raise HTTPException(status_code=401, detail="Email o contraseña incorrectos")
+
+    challenge = start_login_2fa_challenge(user, str(request.base_url).rstrip("/"))
+    return {
+        "authenticated": False,
+        "requires_2fa": True,
+        "challenge_id": challenge["challenge_id"],
+        "expires_at": challenge["expires_at"],
+        "expires_in_seconds": challenge["expires_in_seconds"],
+        "email_masked": challenge["email_masked"],
+        "delivery": challenge["delivery"],
+    }
+
+
+@router.post("/login/verify-2fa", response_model=dict)
+def verify_login_2fa(payload: LoginTwoFactorVerifyRequest, response: Response):
+    try:
+        user = verify_login_2fa_challenge(payload.challenge_id, payload.code)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     token = create_session(int(user["user_id"]), days=30)
     response.set_cookie(
@@ -126,6 +157,23 @@ def login(payload: LoginRequest, response: Response):
     return {
         "authenticated": True,
         "user": user,
+    }
+
+
+@router.post("/login/resend-2fa", response_model=dict)
+def resend_login_2fa(payload: LoginTwoFactorResendRequest, request: Request):
+    try:
+        challenge = resend_login_2fa_challenge(payload.challenge_id, str(request.base_url).rstrip("/"))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return {
+        "ok": True,
+        "challenge_id": challenge["challenge_id"],
+        "expires_at": challenge["expires_at"],
+        "expires_in_seconds": challenge["expires_in_seconds"],
+        "email_masked": challenge["email_masked"],
+        "delivery": challenge["delivery"],
     }
 
 

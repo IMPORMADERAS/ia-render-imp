@@ -1572,6 +1572,31 @@ h2 {
   color: #d5ffe8;
 }
 
+.auth-2fa-wrap {
+  display: grid;
+  gap: 0.55rem;
+  padding: 0.75rem;
+  border: 1px solid rgba(31, 200, 108, 0.3);
+  border-radius: 12px;
+  background:
+    radial-gradient(circle at 12% 12%, rgba(31, 200, 108, 0.11), transparent 55%),
+    rgba(255, 255, 255, 0.02);
+}
+
+.auth-2fa-message {
+  margin: 0;
+  color: #d6ffe8;
+  font-size: 0.83rem;
+  line-height: 1.45;
+}
+
+.auth-2fa-field input {
+  text-align: center;
+  letter-spacing: 0.24em;
+  font-size: 1rem;
+  font-weight: 700;
+}
+
 .prices-table-wrap {
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 10px;
