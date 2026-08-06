@@ -13,67 +13,8 @@
       rel="stylesheet"
     />
     <link rel="stylesheet" href="/studio-imp-static/styles.css" />
-    <style>
-      .iaimp-maintenance-overlay {
-        position: fixed;
-        inset: 0;
-        z-index: 12000;
-        display: none;
-        align-items: center;
-        justify-content: center;
-        background: rgba(5, 10, 8, 0.72);
-        -webkit-backdrop-filter: blur(4px);
-        backdrop-filter: blur(4px);
-        padding: 20px;
-      }
-
-      .iaimp-maintenance-overlay.is-open {
-        display: flex;
-      }
-
-      .iaimp-maintenance-card {
-        width: min(520px, 92vw);
-        border-radius: 20px;
-        padding: 28px 24px;
-        background: linear-gradient(180deg, #15241d 0%, #101813 100%);
-        border: 1px solid rgba(94, 255, 173, 0.28);
-        color: #eafff4;
-        text-align: center;
-        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
-      }
-
-      .iaimp-maintenance-card h2 {
-        margin: 0 0 10px;
-        font-size: 1.7rem;
-      }
-
-      .iaimp-maintenance-card p {
-        margin: 0;
-        color: #bfe8d3;
-        line-height: 1.55;
-      }
-
-      .iaimp-maintenance-btn {
-        margin-top: 18px;
-        border: 0;
-        border-radius: 999px;
-        padding: 10px 20px;
-        font-weight: 700;
-        cursor: pointer;
-        color: #082114;
-        background: #45e29a;
-      }
-    </style>
   </head>
   <body>
-    <div id="iaimp-maintenance-overlay" class="iaimp-maintenance-overlay" role="dialog" aria-modal="true" aria-labelledby="iaimp-maintenance-title">
-      <div class="iaimp-maintenance-card">
-        <h2 id="iaimp-maintenance-title">IA-IMP está en construcción</h2>
-        <p>Muy pronto podrás usarla con una experiencia mejorada.</p>
-        <button id="iaimp-maintenance-close" class="iaimp-maintenance-btn" type="button">Entendido</button>
-      </div>
-    </div>
-
     <div class="app-bg"></div>
     <header class="topbar">
       <div>
@@ -313,17 +254,6 @@
         return false;
     }
     });
-
-      
-      (function () {
-        const overlay = document.getElementById("iaimp-maintenance-overlay");
-        const closeBtn = document.getElementById("iaimp-maintenance-close");
-        if (!overlay || !closeBtn) return;
-        overlay.classList.add("is-open");
-        closeBtn.addEventListener("click", function () {
-          overlay.classList.remove("is-open");
-        });
-      })();
     </script>
     <script src="/studio-imp-static/app.js"></script>
   </body>
