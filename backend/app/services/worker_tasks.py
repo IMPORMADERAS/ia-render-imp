@@ -104,7 +104,7 @@ def run_render_job(
             job_id,
             {
                 "progress": 55,
-                "stage": f"Renderizando en {provider} ({quality})",
+                "stage": f"Renderizando ({quality})",
                 "updated_at": _utc_now_iso(),
             },
         )
